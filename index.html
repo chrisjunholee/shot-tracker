@@ -20,6 +20,7 @@
   --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
   --good-ink:#006300;
+  --sc-birdie:#1f66bd; --sc-par:#157f3a; --sc-bogey:#b8501c; --sc-double:#bf2f24;
   --seq1:#cde2fb; --seq2:#9ec5f4; --seq3:#6da7ec; --seq4:#3987e5; --seq5:#256abf; --seq6:#184f95;
   --r:12px; --pad:14px;
   --safe-b:env(safe-area-inset-bottom,0px);
@@ -33,6 +34,7 @@
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
   --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
   --good-ink:#0ca30c;
+  --sc-birdie:#2a78d6; --sc-par:#18913f; --sc-bogey:#cc5a1f; --sc-double:#cf3629;
   --seq1:#184f95; --seq2:#256abf; --seq3:#2a78d6; --seq4:#3987e5; --seq5:#6da7ec; --seq6:#9ec5f4;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -138,20 +140,33 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .holenav .mid{flex:1;text-align:center}
 .holenav .h{font-size:22px;font-weight:750;letter-spacing:-.02em}
 .holenav .p{font-size:12px;color:var(--muted)}
-.dots{display:grid;grid-template-columns:repeat(18,1fr);gap:3px;margin-bottom:12px}
-.dots button{height:26px;border-radius:5px;background:var(--surface-2);border:1px solid var(--border);font-size:9.5px;font-weight:700;color:var(--muted);padding:0;display:grid;place-items:center}
-.dots button.done{background:var(--brand-wash);color:var(--brand);border-color:var(--brand-2)}
-:root[data-theme="dark"] .dots button.done{color:var(--brand-2)}
-.dots button.cur{outline:2px solid var(--brand);outline-offset:1px;color:var(--ink)}
+/* scorecard strip: fixed hole-number row, colour-coded score row beneath */
+.strip{display:grid;grid-template-columns:repeat(18,1fr);gap:2px;margin-bottom:12px}
+.strip .col{padding:0;border:1px solid var(--border);border-radius:5px;overflow:hidden;display:block}
+.strip .hn,.strip .sc{display:flex;align-items:center;justify-content:center;line-height:1;font-variant-numeric:tabular-nums}
+.strip .hn{height:17px;font-size:9px;font-weight:700;color:var(--muted);background:var(--surface-2)}
+.strip .hn.t{color:var(--brand);background:var(--brand-wash)}
+:root[data-theme="dark"] .strip .hn.t{color:var(--brand-2)}
+.strip .sc{height:23px;font-size:12px;font-weight:750;background:var(--surface);color:var(--ink)}
+.strip .sc.birdie{background:var(--sc-birdie);color:#fff}
+.strip .sc.par{background:var(--sc-par);color:#fff}
+.strip .sc.bogey{background:var(--sc-bogey);color:#fff}
+.strip .sc.double{background:var(--sc-double);color:#fff}
+.strip .col.cur{outline:2px solid var(--brand);outline-offset:1px}
+:root[data-theme="dark"] .strip .col.cur{outline-color:var(--brand-2)}
+
+/* bottom hole navigation */
+.footnav{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:16px 0 8px}
+.footnav .btn{padding:9px 4px;font-size:12.5px;min-height:58px;line-height:1.2;text-align:center;font-weight:600}
 
 .scorebar{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:6px}
 .scorebar .step{width:54px;height:54px;border-radius:50%;background:var(--surface);border:1px solid var(--border);font-size:26px;display:grid;place-items:center;flex:none}
 .scorebar .val{font-size:40px;font-weight:750;min-width:78px;height:56px;text-align:center;letter-spacing:-.03em;font-variant-numeric:tabular-nums;background:none;border:none}
-.scorebar .rel{font-size:12px;font-weight:650;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--ink-2)}
-.rel.under{background:#e8f6e8;color:var(--good-ink)}
-.rel.over{background:#fdecec;color:var(--crit)}
-:root[data-theme="dark"] .rel.under{background:#16261a}
-:root[data-theme="dark"] .rel.over{background:#2a1717;color:#e66767}
+.scorebar .rel{font-size:12px;font-weight:650;padding:5px 12px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);line-height:1}
+.rel.birdie{background:var(--sc-birdie);color:#fff}
+.rel.par{background:var(--sc-par);color:#fff}
+.rel.bogey{background:var(--sc-bogey);color:#fff}
+.rel.double{background:var(--sc-double);color:#fff}
 
 /* ---------- 3x3 miss grid ---------- */
 .missgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-width:280px;margin:0 auto}
@@ -308,8 +323,10 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 const KEY = 'shotTrackerV1';
 
 /* ---------- reference data ---------- */
-const CLUBS = ['Driver','3 wood','5 wood','7 wood','2 hybrid','3 hybrid','4 hybrid','5 hybrid',
-  '3 iron','4 iron','5 iron','6 iron','7 iron','8 iron','9 iron','PW','50°','52°','54°','56°','58°','60°'];
+const CLUBS = ['Driver','Mini driver','3 wood','4 wood','5 wood',
+  '3 hybrid','4 hybrid','5 hybrid',
+  '3 iron','4 iron','5 iron','6 iron','7 iron','8 iron','9 iron',
+  'Pitching wedge','Gap wedge','Sand wedge','Lob wedge'];
 
 const TEE_OUT = [
   {k:'good',    label:'Good',    sub:'In play, clear shot', cls:'ok'},
@@ -439,6 +456,16 @@ let cur = { roundId:null, hole:0 };
 const R = () => DB.rounds.find(r => r.id === cur.roundId) || null;
 const H = () => { const r = R(); return r ? r.holes[cur.hole] : null; };
 
+/* birdie-or-better / par / bogey / double-or-worse */
+function scoreClass(rel){
+  return rel==null ? '' : rel<=-1 ? 'birdie' : rel===0 ? 'par' : rel===1 ? 'bogey' : 'double';
+}
+function scoreLabel(rel){
+  if (rel==null) return '';
+  if (rel<=-3) return 'Albatross';
+  return {'-2':'Eagle','-1':'Birdie','0':'Par','1':'Bogey','2':'Double','3':'Triple'}[String(rel)] || plus(rel);
+}
+
 function holeTouched(h){
   return h.score!=null || h.tee.outcome || h.app.state || h.putts.length || h.short.length || h.mental.length;
 }
@@ -515,8 +542,10 @@ function chipRow(act, opts, selected, attr){
   }).join('') + '</div>';
 }
 function selectEl(act, opts, val, blank){
+  /* a club logged before the list changed stays selectable rather than silently resetting */
+  const list = (val && opts.indexOf(val)===-1) ? [val].concat(opts) : opts;
   return '<select data-act="'+act+'">' + (blank?'<option value="">'+esc(blank)+'</option>':'')
-    + opts.map(o=>'<option value="'+esc(o)+'"'+(o===val?' selected':'')+'>'+esc(o)+'</option>').join('') + '</select>';
+    + list.map(o=>'<option value="'+esc(o)+'"'+(o===val?' selected':'')+'>'+esc(o)+'</option>').join('') + '</select>';
 }
 function card(id, title, badge, body){
   const col = DB.settings.collapsed[id] ? ' collapsed' : '';
@@ -583,9 +612,13 @@ function holeScreen(r){
     + (t ? ' · Round ' + t.strokes + ' (' + (t.strokes-t.par===0?'E':plus(t.strokes-t.par)) + ')' : '') + '</div></div>'
     + '<button class="nb" data-act="next">›</button></div>';
 
-  out += '<div class="dots">' + r.holes.map((x,i)=>
-    '<button data-act="jump" data-v="'+i+'" class="'+(holeTouched(x)?'done ':'')+(i===cur.hole?'cur':'')+'">'
-    + (x.score!=null ? x.score : x.n) + '</button>').join('') + '</div>';
+  out += '<div class="strip">' + r.holes.map((x,i)=>{
+    const rl = x.score!=null ? x.score - x.par : null;
+    return '<button class="col'+(i===cur.hole?' cur':'')+'" data-act="jump" data-v="'+i+'" '
+      + 'aria-label="Hole '+x.n+(x.score!=null?', '+x.score+' — '+scoreLabel(rl):'')+'">'
+      + '<span class="hn'+(holeTouched(x)?' t':'')+'">'+x.n+'</span>'
+      + '<span class="sc '+scoreClass(rl)+'">'+(x.score!=null?x.score:'')+'</span></button>';
+  }).join('') + '</div>';
 
   /* score */
   const rel = h.score!=null ? h.score - h.par : null;
@@ -596,7 +629,7 @@ function holeScreen(r){
     + '<button class="step" data-act="sc" data-v="1">+</button></div>'
     + (h.score==null ? '<div class="sublbl" style="text-align:center;margin-top:-2px">tap the number for par, or step up and down</div>' : '')
     + '<div class="row" style="justify-content:center;gap:8px">'
-    + (rel!=null ? '<span class="rel '+(rel<0?'under':rel>0?'over':'')+'">'+(rel===0?'Par':rel===-1?'Birdie':rel===-2?'Eagle':rel===1?'Bogey':rel===2?'Double':plus(rel))+'</span>' : '')
+    + (rel!=null ? '<span class="rel '+scoreClass(rel)+'">'+scoreLabel(rel)+'</span>' : '')
     + '<span class="rel">'+h.putts.length+' putt'+(h.putts.length===1?'':'s')+'</span>'
     + '</div>'
     + '<div class="row" style="margin-top:12px"><span class="lbl">Par</span>'+segRow('par',[3,4,5],h.par)+'</div>'
@@ -689,9 +722,11 @@ function holeScreen(r){
   out += card('mental','Mental &amp; strategy', h.mental.length?h.mental.length+'':'', mb);
 
   /* footer */
-  out += '<div class="row" style="margin:16px 0 8px">'
-    + '<button class="btn ghost grow" data-act="exit">Round list</button>'
-    + '<button class="btn grow" data-act="finish">'+(r.finished?'Round summary':'Finish round')+'</button></div>';
+  out += '<div class="footnav">'
+    + '<button class="btn ghost" data-act="exit">Round list</button>'
+    + '<button class="btn ghost" data-act="prev">‹ Previous hole</button>'
+    + '<button class="btn" data-act="next">Next hole ›</button>'
+    + '<button class="btn ghost" data-act="finish">'+(r.finished?'Round summary':'Finish round')+'</button></div>';
 
   return out;
 }
