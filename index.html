@@ -134,6 +134,15 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .btn.full{width:100%}
 .btn:disabled{opacity:.45}
 
+/* course-handicap readout on the start form */
+.chbox{margin-top:12px;padding:11px 13px;border:1px solid var(--brand-2);border-radius:var(--r);background:var(--brand-wash)}
+.chbox.muted{border-color:var(--border);background:var(--surface-2);color:var(--muted);font-size:13px;line-height:1.4}
+.chbox .chv{font-size:15px;font-weight:650;color:var(--ink)}
+.chbox .chv b{font-size:22px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.chbox .chm{font-size:12.5px;color:var(--ink-2);margin-top:3px;line-height:1.45;font-variant-numeric:tabular-nums}
+.chbox .chw{font-size:12.5px;color:var(--crit);margin-top:6px;line-height:1.4}
+:root[data-theme="dark"] .chbox .chv{color:var(--ink)}
+
 /* ---------- hole nav ---------- */
 .holenav{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .holenav .nb{width:52px;height:52px;border-radius:14px;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;font-size:22px;flex:none}
@@ -446,6 +455,7 @@ function newRound(m){
   const pars  = prior.length ? prior[0].holes.map(h=>h.par) : DEFAULT_PARS;
   return {
     id: uid(), date: m.date, course: m.course, tees: m.tees,
+    rating: m.rating, slope: m.slope, index: m.index,
     wind: m.wind, temp: m.temp, conditions: m.conditions, feel: m.feel,
     notes:'', finished:false, created: Date.now(),
     holes: Array.from({length:18}, (_,i)=>newHole(i, pars[i]))
@@ -473,6 +483,24 @@ function roundTotal(r){
   const s = r.holes.filter(h=>h.score!=null);
   return s.length ? { strokes: s.reduce((a,h)=>a+h.score,0), par: s.reduce((a,h)=>a+h.par,0), n: s.length } : null;
 }
+/* ---------- World Handicap System ----------
+   Course Handicap = Index x (Slope / 113) + (Course Rating - Par), rounded.
+   Score Differential = (113 / Slope) x (Gross - Course Rating). PCC is ignored. */
+function totalPar(r){ return r.holes.reduce((a,h)=>a+h.par,0); }
+
+function courseHandicap(index, slope, rating, par){
+  if (index==null || slope==null || !slope) return null;
+  const adj = (rating!=null && par!=null) ? (rating - par) : 0;
+  return Math.round(index * (slope/113) + adj);
+}
+function scoreDifferential(gross, rating, slope){
+  if (gross==null || rating==null || slope==null || !slope) return null;
+  return (113/slope) * (gross - rating);
+}
+/* soft sanity bounds — out-of-range values still compute, they just get flagged */
+const SANE = { rating:[55,90], slope:[55,155], index:[-10,54] };
+function outOfRange(k, v){ return v!=null && (v < SANE[k][0] || v > SANE[k][1]); }
+
 function totalPutts(r){ return r.holes.reduce((a,h)=>a+h.putts.length,0); }
 
 /* ---------- navigation ---------- */
@@ -563,6 +591,64 @@ function renderRound(){
   $('#roundWrap').innerHTML = r ? holeScreen(r) : startScreen();
 }
 
+/* most recent index entered, so it carries between rounds */
+function lastIndex(){
+  const r = DB.rounds.slice().sort((a,b)=>b.created-a.created).find(x=>x.index!=null);
+  return r ? r.index : null;
+}
+/* rating and slope remembered per course + tee */
+function lastTeeBox(course, tees){
+  const c = (course||'').trim().toLowerCase(), t = (tees||'').trim().toLowerCase();
+  if (!c) return null;
+  return DB.rounds.slice().sort((a,b)=>b.created-a.created).find(r =>
+    (r.course||'').trim().toLowerCase() === c &&
+    (!t || (r.tees||'').trim().toLowerCase() === t) &&
+    (r.rating!=null || r.slope!=null)) || null;
+}
+/* the par this round will actually start with */
+function parForCourse(course){
+  const prior = DB.rounds.find(r => (r.course||'').toLowerCase() === (course||'').toLowerCase() && r.holes);
+  return (prior ? prior.holes.map(h=>h.par) : DEFAULT_PARS).reduce((a,b)=>a+b,0);
+}
+
+const numOrNull = el => (!el || el.value==='') ? null : (isNaN(+el.value) ? null : +el.value);
+
+/* Updates only #chOut — never re-renders the form, so it cannot swallow the next tap. */
+function updateCH(){
+  const out = $('#chOut'); if (!out) return;
+  const courseEl = $('#nrCourse'), teesEl = $('#nrTees');
+  const rEl = $('#nrRating'), sEl = $('#nrSlope'), iEl = $('#nrIndex');
+
+  /* prefill rating and slope from the last round off these tees, never overwriting typing */
+  const box = lastTeeBox(courseEl && courseEl.value, teesEl && teesEl.value);
+  if (box){
+    if (rEl && rEl.value==='' && box.rating!=null) rEl.value = box.rating;
+    if (sEl && sEl.value==='' && box.slope!=null)  sEl.value = box.slope;
+  }
+
+  const rating = numOrNull(rEl), slope = numOrNull(sEl), index = numOrNull(iEl);
+  const par = parForCourse(courseEl ? courseEl.value : '');
+  const warn = [];
+  if (outOfRange('rating', rating)) warn.push('course rating is normally 60–80');
+  if (outOfRange('slope',  slope))  warn.push('slope runs 55–155');
+  if (outOfRange('index',  index))  warn.push('that index looks off');
+
+  if (index==null || slope==null){
+    out.className = 'chbox muted';
+    out.innerHTML = 'Enter your index and the slope and this works out your course handicap.';
+    return;
+  }
+  const ch = courseHandicap(index, slope, rating, par);
+  out.className = 'chbox';
+  out.innerHTML = '<div class="chv">Course handicap <b>'+plus(ch)+'</b></div>'
+    + '<div class="chm">' + r1(index) + ' × (' + slope + ' ÷ 113)'
+    + (rating!=null ? ' + (' + r1(rating) + ' − ' + par + ')' : '')
+    + ' — shoot <b>' + (par + ch) + '</b> to play to your handicap.'
+    + (rating==null ? ' Add the course rating for the full formula.' : '')
+    + '</div>'
+    + (warn.length ? '<div class="chw">Worth a check — ' + warn.join('; ') + '.</div>' : '');
+}
+
 function startScreen(){
   const today = new Date().toISOString().slice(0,10);
   const recent = DB.rounds.slice().sort((a,b)=>b.created-a.created);
@@ -572,6 +658,12 @@ function startScreen(){
     + '<div class="row"><div class="fld grow"><label>Course</label><input type="text" id="nrCourse" list="courseList" placeholder="Torrey Pines South" autocomplete="off"></div>'
     + '<datalist id="courseList">'+courses.map(c=>'<option value="'+esc(c)+'">').join('')+'</datalist>'
     + '<div class="fld" style="width:110px"><label>Tees</label><input type="text" id="nrTees" placeholder="Blue"></div></div>'
+    + '<div class="row"><div class="fld grow"><label>Course rating</label>'
+    + '<input type="number" step="0.1" id="nrRating" inputmode="decimal" placeholder="72.4"></div>'
+    + '<div class="fld grow"><label>Slope</label><input type="number" id="nrSlope" inputmode="numeric" placeholder="129"></div>'
+    + '<div class="fld grow"><label>Your index</label>'
+    + '<input type="number" step="0.1" id="nrIndex" inputmode="decimal" placeholder="12.4" value="'+(lastIndex()??'')+'"></div></div>'
+    + '<div class="chbox" id="chOut"></div>'
     + '<div class="row"><div class="fld grow"><label>Wind</label>'
     + '<select id="nrWind"><option value="">—</option><option>Calm</option><option>Light</option><option>Moderate</option><option>Strong</option></select></div>'
     + '<div class="fld grow"><label>Conditions</label>'
@@ -791,12 +883,21 @@ function finishRound(){
   r.finished = true; save();
   const t = roundTotal(r) || {strokes:0,par:0,n:0};
   const s = summarise([r]);
+  const full = t.n === 18;
+  const ch   = courseHandicap(r.index, r.slope, r.rating, totalPar(r));
+  const diff = full ? scoreDifferential(t.strokes, r.rating, r.slope) : null;
   const b = '<div class="tiles">'
     + tile('Score', t.strokes, (t.strokes-t.par===0?'E':plus(t.strokes-t.par)) + ' · ' + t.n + ' holes')
     + tile('Putts', totalPutts(r), s.threePutts + ' three-putt' + (s.threePutts===1?'':'s'))
     + tile('Drives in play', fmtPct(s.inPlayPct), s.teeLogged + ' tee shots')
     + tile('Greens', fmtPct(s.girPct), s.girN + ' of ' + s.appN)
+    + (ch!=null ? tile('Net', t.strokes - ch,
+        'course handicap ' + plus(ch) + (full ? ' · target ' + (totalPar(r) + ch) : '')) : '')
+    + (diff!=null ? tile('Differential', r1(diff),
+        diff <= (r.index ?? Infinity) ? 'better than your index — this one helps' : 'above your index',
+        diff <= (r.index ?? Infinity) ? 'pos' : 'neg') : '')
     + '</div>'
+    + (ch!=null && !full ? '<div class="note">Score differential needs all 18 holes, so it appears once the round is complete.</div>' : '')
     + '<div class="row"><div class="fld grow"><label>Round notes</label>'
     + '<textarea data-sact="rnote" placeholder="What was the story of the round?">'+esc(r.notes||'')+'</textarea></div></div>'
     + (s.leaks.length ? '<hr class="sep"><h4 style="margin-bottom:8px">Biggest leaks this round</h4>'
@@ -1368,13 +1469,17 @@ function csvShots(){
   dl('shots.csv', rows.join('\n'));
 }
 function csvRounds(){
-  const head = ['date','course','tees','conditions','wind','temp','feel','holes','strokes','par','to_par','putts',
+  const head = ['date','course','tees','course_rating','slope','handicap_index','course_handicap','net','score_differential',
+    'conditions','wind','temp','feel','holes','strokes','par','to_par','putts',
     'three_putts','drives_logged','in_play_pct','clear_shot_pct','gir_pct','scrambling_pct','sg_putting','notes'];
   const rows = [head.join(',')];
   DB.rounds.forEach(r=>{
     const t = roundTotal(r); if(!t) return;
     const S = summarise([r]);
-    rows.push([r.date,r.course,r.tees,r.conditions,r.wind,r.temp,r.feel,t.n,t.strokes,t.par,t.strokes-t.par,
+    const ch = courseHandicap(r.index, r.slope, r.rating, totalPar(r));
+    const diff = t.n === 18 ? scoreDifferential(t.strokes, r.rating, r.slope) : null;
+    rows.push([r.date,r.course,r.tees,r.rating,r.slope,r.index,ch,ch!=null?t.strokes-ch:null,diff!=null?r1(diff):null,
+      r.conditions,r.wind,r.temp,r.feel,t.n,t.strokes,t.par,t.strokes-t.par,
       totalPutts(r),S.threePutts,S.teeLogged,S.inPlayPct,S.clearPct,S.girPct,S.scrPct,r2(S.sgPutt),r.notes].map(q).join(','));
   });
   dl('rounds.csv', rows.join('\n'));
@@ -1429,6 +1534,7 @@ document.addEventListener('input', e=>{
   const t = e.target;
   if (t.dataset.act==='hole-note'){ const h=H(); if(h){ h.note=t.value; save(); } return; }
   if (t.id==='pNotes'){ pDraft.notes = t.value; return; }
+  if (['nrCourse','nrTees','nrRating','nrSlope','nrIndex'].indexOf(t.id) > -1){ updateCH(); return; }
   if (['app-dist','app-prox'].indexOf(t.dataset.act)>-1){
     const h=H(); if(!h) return;
     setField(h.app, t.dataset.act==='app-dist'?'dist':'prox', t.value===''?null:+t.value); save(); return;
@@ -1450,6 +1556,7 @@ function action(a, v, node, ev){
       const feelBtn = document.querySelector('[data-act="nr-feel"].on');
       const nr = newRound({
         date: $('#nrDate').value, course, tees: $('#nrTees').value.trim(),
+        rating: numOrNull($('#nrRating')), slope: numOrNull($('#nrSlope')), index: numOrNull($('#nrIndex')),
         wind: $('#nrWind').value, conditions: $('#nrCond').value,
         temp: $('#nrTemp').value ? +$('#nrTemp').value : null,
         feel: feelBtn ? +feelBtn.dataset.v : null
