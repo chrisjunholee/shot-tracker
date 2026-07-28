@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#14532d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shot Tracker">
+<link rel="manifest" href="manifest.json">
+<title>Shot Tracker</title>
+<style>
+:root{
+  color-scheme:light;
+  --plane:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ed;
+  --ink:#0b0b0b; --ink-2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,.10);
+  --brand:#14532d; --brand-2:#1baf7a; --brand-wash:#e8f3ec;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --good-ink:#006300;
+  --seq1:#cde2fb; --seq2:#9ec5f4; --seq3:#6da7ec; --seq4:#3987e5; --seq5:#256abf; --seq6:#184f95;
+  --r:12px; --pad:14px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --plane:#0d0d0d; --surface:#1a1a19; --surface-2:#242422;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,.10);
+  --brand:#1baf7a; --brand-2:#199e70; --brand-wash:#16261f;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --good-ink:#0ca30c;
+  --seq1:#184f95; --seq2:#256abf; --seq3:#2a78d6; --seq4:#3987e5; --seq5:#6da7ec; --seq6:#9ec5f4;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--plane); color:var(--ink);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding-bottom:calc(72px + var(--safe-b));
+  overscroll-behavior-y:contain;
+}
+h1,h2,h3,h4{margin:0;font-weight:650;letter-spacing:-.01em}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font:inherit;color:var(--ink)}
+a{color:var(--s1)}
+
+/* ---------- top bar ---------- */
+.topbar{
+  position:sticky;top:0;z-index:40;background:var(--brand);color:#fff;
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;
+  display:flex;align-items:center;gap:10px;
+}
+.topbar h1{font-size:17px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topbar .sub{font-size:12px;opacity:.8;font-weight:400}
+.icon-btn{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px;background:rgba(255,255,255,.14);color:#fff;flex:none}
+
+/* ---------- layout ---------- */
+.wrap{max-width:640px;margin:0 auto;padding:12px}
+.view{display:none}
+.view.on{display:block}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.card > .hd{
+  display:flex;align-items:center;gap:8px;padding:11px var(--pad);
+  border-bottom:1px solid var(--border);background:var(--surface-2);
+}
+.card > .hd h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);flex:1}
+.card > .bd{padding:var(--pad)}
+.card.collapsed > .bd{display:none}
+.chev{font-size:12px;color:var(--muted);transition:transform .15s}
+.card.collapsed .chev{transform:rotate(-90deg)}
+.hd .tick{font-size:12px;color:var(--good-ink);font-weight:650}
+
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row + .row{margin-top:10px}
+.lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650;width:100%;margin-bottom:-2px}
+.sublbl{font-size:12px;color:var(--muted)}
+.grow{flex:1;min-width:0}
+.hidden{display:none !important}
+
+/* ---------- chips / segmented ---------- */
+.chip{
+  border:1px solid var(--border);background:var(--surface);border-radius:999px;
+  padding:9px 13px;font-size:14px;font-weight:550;color:var(--ink-2);
+  min-height:40px;display:inline-flex;align-items:center;gap:6px;
+}
+.chip:active{transform:scale(.97)}
+.chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.chip.on.warnstate{background:var(--crit);border-color:var(--crit)}
+.chip.sm{padding:6px 10px;font-size:13px;min-height:34px}
+.chip.wide{flex:1;justify-content:center}
+
+.seg{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:6px;width:100%}
+.seg.c2{grid-template-columns:1fr 1fr}
+.seg.c3{grid-template-columns:1fr 1fr 1fr}
+.seg.c4{grid-template-columns:repeat(4,1fr)}
+.seg button{
+  border:1px solid var(--border);background:var(--surface);border-radius:10px;
+  padding:10px 6px;font-size:14px;font-weight:600;color:var(--ink-2);min-height:48px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;line-height:1.15;
+}
+.seg button small{font-size:10.5px;font-weight:500;color:var(--muted);letter-spacing:.01em}
+.seg button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.seg button.on small{color:rgba(255,255,255,.8)}
+.seg button.on.ok{background:var(--good);border-color:var(--good)}
+.seg button.on.bad{background:var(--crit);border-color:var(--crit)}
+.seg button.on.mid{background:var(--serious);border-color:var(--serious);color:#0b0b0b}
+.seg button.on.mid small{color:rgba(11,11,11,.65)}
+
+/* ---------- inputs ---------- */
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650}
+input[type=number],input[type=text],input[type=date],select,textarea{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 11px;min-height:44px;width:100%;outline:none;
+}
+input:focus,select:focus,textarea:focus{border-color:var(--brand-2);box-shadow:0 0 0 3px var(--brand-wash)}
+textarea{min-height:64px;resize:vertical;line-height:1.4}
+input[type=number]{-moz-appearance:textfield}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+.btn{
+  background:var(--brand);color:#fff;border-radius:11px;padding:12px 16px;
+  font-weight:650;min-height:48px;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+}
+.btn.ghost{background:var(--surface);color:var(--ink);border:1px solid var(--border)}
+.btn.danger{background:var(--crit)}
+.btn.full{width:100%}
+.btn:disabled{opacity:.45}
+
+/* ---------- hole nav ---------- */
+.holenav{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.holenav .nb{width:52px;height:52px;border-radius:14px;background:var(--surface);border:1px solid var(--border);display:grid;place-items:center;font-size:22px;flex:none}
+.holenav .mid{flex:1;text-align:center}
+.holenav .h{font-size:22px;font-weight:750;letter-spacing:-.02em}
+.holenav .p{font-size:12px;color:var(--muted)}
+.dots{display:grid;grid-template-columns:repeat(18,1fr);gap:3px;margin-bottom:12px}
+.dots button{height:26px;border-radius:5px;background:var(--surface-2);border:1px solid var(--border);font-size:9.5px;font-weight:700;color:var(--muted);padding:0;display:grid;place-items:center}
+.dots button.done{background:var(--brand-wash);color:var(--brand);border-color:var(--brand-2)}
+:root[data-theme="dark"] .dots button.done{color:var(--brand-2)}
+.dots button.cur{outline:2px solid var(--brand);outline-offset:1px;color:var(--ink)}
+
+.scorebar{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:6px}
+.scorebar .step{width:54px;height:54px;border-radius:50%;background:var(--surface);border:1px solid var(--border);font-size:26px;display:grid;place-items:center;flex:none}
+.scorebar .val{font-size:40px;font-weight:750;min-width:78px;height:56px;text-align:center;letter-spacing:-.03em;font-variant-numeric:tabular-nums;background:none;border:none}
+.scorebar .rel{font-size:12px;font-weight:650;padding:3px 9px;border-radius:999px;background:var(--surface-2);color:var(--ink-2)}
+.rel.under{background:#e8f6e8;color:var(--good-ink)}
+.rel.over{background:#fdecec;color:var(--crit)}
+:root[data-theme="dark"] .rel.under{background:#16261a}
+:root[data-theme="dark"] .rel.over{background:#2a1717;color:#e66767}
+
+/* ---------- 3x3 miss grid ---------- */
+.missgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-width:280px;margin:0 auto}
+.missgrid button{
+  aspect-ratio:1.35;border:1px solid var(--border);background:var(--surface);border-radius:10px;
+  font-size:11px;font-weight:600;color:var(--ink-2);display:grid;place-items:center;text-align:center;line-height:1.1;
+}
+.missgrid button.centre{background:var(--brand-wash);color:var(--brand);border-color:var(--brand-2);font-size:18px}
+:root[data-theme="dark"] .missgrid button.centre{color:var(--brand-2)}
+.missgrid button.on{background:var(--crit);border-color:var(--crit);color:#fff}
+.missgrid button.centre.on{background:var(--good);border-color:var(--good);color:#fff}
+
+/* ---------- shot list rows ---------- */
+.shotrow{
+  display:flex;align-items:center;gap:10px;padding:10px 11px;border:1px solid var(--border);
+  border-radius:10px;background:var(--surface);margin-bottom:7px;
+}
+.shotrow .n{width:26px;height:26px;border-radius:7px;background:var(--surface-2);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--ink-2);flex:none}
+.shotrow .txt{flex:1;min-width:0;font-size:13.5px;line-height:1.3}
+.shotrow .txt b{font-weight:650}
+.shotrow .txt em{font-style:normal;color:var(--muted);font-size:12.5px;display:block}
+.shotrow .del{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;color:var(--muted);font-size:16px;flex:none;background:var(--surface-2)}
+.holed{color:var(--good-ink);font-weight:700}
+
+/* ---------- sheet ---------- */
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90;display:none}
+.sheet-bg.on{display:block}
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:91;background:var(--surface);
+  border-radius:18px 18px 0 0;max-height:92vh;overflow:auto;display:none;
+  padding:0 0 calc(16px + var(--safe-b));box-shadow:0 -8px 32px rgba(0,0,0,.2);
+}
+.sheet.on{display:block}
+.sheet .shd{position:sticky;top:0;background:var(--surface);padding:14px var(--pad) 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;z-index:2}
+.sheet .shd h3{font-size:16px;flex:1}
+.sheet .sbd{padding:var(--pad)}
+.grab{width:38px;height:4px;border-radius:2px;background:var(--axis);margin:8px auto 0}
+
+/* ---------- stats ---------- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 13px}
+.tile .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650}
+.tile .v{font-size:27px;font-weight:750;letter-spacing:-.02em;margin-top:3px;line-height:1.1}
+.tile .v small{font-size:14px;font-weight:600;color:var(--ink-2)}
+.tile .d{font-size:12px;color:var(--ink-2);margin-top:2px}
+.tile .d.pos{color:var(--good-ink)}
+.tile .d.neg{color:var(--crit)}
+
+.chartbox{margin-bottom:16px}
+.chartbox h4{font-size:14px;margin-bottom:2px}
+.chartbox .cap{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.35}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);margin-bottom:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+svg{display:block;width:100%;overflow:visible}
+svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--muted)}
+svg text.val{fill:var(--ink-2);font-weight:650;font-variant-numeric:tabular-nums}
+svg text.lab{fill:var(--ink-2)}
+svg .gl{stroke:var(--grid);stroke-width:1}
+svg .ax{stroke:var(--axis);stroke-width:1}
+svg rect.mk{rx:4}
+
+.leak{display:flex;gap:11px;padding:12px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);margin-bottom:8px;align-items:flex-start}
+.leak .rank{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:750;color:#fff;flex:none;background:var(--muted)}
+.leak.p1 .rank{background:var(--crit)}
+.leak.p2 .rank{background:var(--serious)}
+.leak.p3 .rank{background:var(--warn);color:#0b0b0b}
+.leak .t{font-size:14.5px;font-weight:650}
+.leak .s{font-size:13px;color:var(--ink-2);margin-top:2px;line-height:1.4}
+.leak .fix{font-size:12.5px;color:var(--muted);margin-top:5px;line-height:1.4}
+
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl th,table.tbl td{padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-variant-numeric:tabular-nums}
+table.tbl th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:650}
+table.tbl th:first-child,table.tbl td:first-child{text-align:left;font-variant-numeric:normal}
+details.tblwrap{margin-top:8px}
+details.tblwrap summary{font-size:12.5px;color:var(--s1);cursor:pointer;padding:4px 0}
+
+.empty{text-align:center;padding:44px 20px;color:var(--muted)}
+.empty .big{font-size:40px;margin-bottom:8px}
+.empty p{margin:6px 0 0;font-size:14px;line-height:1.5}
+
+.roundrow{display:flex;align-items:center;gap:11px;padding:12px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);margin-bottom:8px}
+.roundrow .sc{width:46px;height:46px;border-radius:11px;background:var(--surface-2);display:grid;place-items:center;font-size:18px;font-weight:750;flex:none;font-variant-numeric:tabular-nums}
+.roundrow .m{flex:1;min-width:0}
+.roundrow .m b{font-size:14.5px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.roundrow .m span{font-size:12px;color:var(--muted)}
+
+/* ---------- bottom nav ---------- */
+.nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--surface);
+  border-top:1px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);
+  padding-bottom:var(--safe-b);
+}
+.nav button{padding:9px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--muted)}
+.nav button .ic{font-size:19px;line-height:1}
+.nav button.on{color:var(--brand)}
+:root[data-theme="dark"] .nav button.on{color:var(--brand-2)}
+
+.toast{
+  position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + var(--safe-b));z-index:120;
+  background:var(--ink);color:var(--plane);padding:11px 17px;border-radius:11px;font-size:13.5px;font-weight:600;
+  opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center;
+}
+.toast.on{opacity:1}
+.note{font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:8px}
+hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="grow">
+    <h1 id="barTitle">Shot Tracker</h1>
+    <div class="sub" id="barSub">Adam Young method</div>
+  </div>
+  <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
+</div>
+
+<!-- ============ ROUND ============ -->
+<div class="view on" id="view-round"><div class="wrap" id="roundWrap"></div></div>
+
+<!-- ============ STATS ============ -->
+<div class="view" id="view-stats"><div class="wrap" id="statsWrap"></div></div>
+
+<!-- ============ PRACTICE ============ -->
+<div class="view" id="view-practice"><div class="wrap" id="practiceWrap"></div></div>
+
+<!-- ============ DATA ============ -->
+<div class="view" id="view-data"><div class="wrap" id="dataWrap"></div></div>
+
+<div class="nav">
+  <button data-nav="round" class="on"><span class="ic">⛳</span>Round</button>
+  <button data-nav="stats"><span class="ic">◧</span>Stats</button>
+  <button data-nav="practice"><span class="ic">◎</span>Practice</button>
+  <button data-nav="data"><span class="ic">⚙</span>Data</button>
+</div>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet">
+  <div class="grab"></div>
+  <div class="shd"><h3 id="sheetTitle"></h3><button class="icon-btn" id="sheetClose" style="background:var(--surface-2);color:var(--ink)">✕</button></div>
+  <div class="sbd" id="sheetBody"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================================================================
+   Shot Tracker — Adam Young method, extended
+   Single-file offline app. All data in localStorage.
+   ================================================================ */
+'use strict';
+
+const KEY = 'shotTrackerV1';
+
+/* ---------- reference data ---------- */
+const CLUBS = ['Driver','3 wood','5 wood','7 wood','2 hybrid','3 hybrid','4 hybrid','5 hybrid',
+  '3 iron','4 iron','5 iron','6 iron','7 iron','8 iron','9 iron','PW','50°','52°','54°','56°','58°','60°'];
+
+const TEE_OUT = [
+  {k:'good',    label:'Good',    sub:'In play, clear shot', cls:'ok'},
+  {k:'blocked', label:'Blocked', sub:'In play, no shot',    cls:'mid'},
+  {k:'trouble', label:'Trouble', sub:'Recovery only',       cls:'bad'},
+  {k:'penalty', label:'Penalty', sub:'OB / lost / hazard',  cls:'bad'}
+];
+const TEE_STRIKE = ['Toe','Heel','High','Low'];
+const OFFLINE = ['Under 10y','10–25y','25–50y','50y+'];
+const LIES = ['Tee','Fairway','Light rough','Heavy rough','Sand','Recovery'];
+const SG_LIES = ['Fairway','Light rough','Heavy rough','Sand','Hardpan','Fringe'];
+const APP_STRIKE = ['Flush','Fat','Thin','Toe','Heel'];
+const SG_STRIKE  = ['Flush','Fat','Thin','Toe','Heel','Bladed'];
+
+/* 3×3 miss grid, reading order (row 1 = long) */
+const ZONES = [
+  {k:'LL',label:'Long<br>left'},  {k:'L', label:'Long'},  {k:'LR',label:'Long<br>right'},
+  {k:'ML',label:'Left'},          {k:'GIR',label:'⛳'},    {k:'MR',label:'Right'},
+  {k:'SL',label:'Short<br>left'}, {k:'S', label:'Short'}, {k:'SR',label:'Short<br>right'}
+];
+
+const MENTAL = ['Too aggressive strategy','Mis-calculation','Fear','Club selection',
+  'Distracted','Loss of cue-focus','Mis-judged conditions','No commitment to decision'];
+
+const BREAKS = [{k:'L2R',label:'Left → right'},{k:'R2L',label:'Right → left'},{k:'straight',label:'Straight'}];
+const SLOPES = [{k:'up',label:'Uphill'},{k:'down',label:'Downhill'},{k:'flat',label:'Flat'}];
+const PUTT_MISS = ['Short','Long','High side','Low side','Pushed','Pulled','Misread'];
+const PUTT_QUICK = [2,3,4,5,6,8,10,12,15,20,25,30,40,50];
+
+const DEFAULT_PARS = [4,5,3,4,4,3,4,5,4,4,4,3,5,4,3,4,4,5];
+
+/* Expected putts from distance — PGA Tour baseline (approximate, Broadie-style).
+   Used for strokes-gained putting. Editable in Data → Settings if you want your own. */
+const EXP_PUTTS = [[1,1.001],[2,1.009],[3,1.053],[4,1.147],[5,1.256],[6,1.357],[7,1.443],
+  [8,1.515],[9,1.575],[10,1.626],[12,1.706],[15,1.787],[20,1.883],[25,1.945],[30,1.991],
+  [35,2.027],[40,2.061],[50,2.117],[60,2.166],[70,2.211],[80,2.254],[90,2.294],[100,2.334]];
+
+const PUTT_BUCKETS = [
+  {k:'0–3 ft', lo:0,  hi:3.001, base:.99},
+  {k:'3–5 ft', lo:3.001, hi:5.001, base:.84},
+  {k:'5–8 ft', lo:5.001, hi:8.001, base:.58},
+  {k:'8–12 ft',lo:8.001, hi:12.001,base:.35},
+  {k:'12–20 ft',lo:12.001,hi:20.001,base:.20},
+  {k:'20–30 ft',lo:20.001,hi:30.001,base:.11},
+  {k:'30 ft +', lo:30.001,hi:1e9,  base:.05}
+];
+
+const PRACTICE_AREAS = ['Driver / tee shots','Long game strike','Iron strike','Iron distance control',
+  'Wedges 50–110y','Short game / chipping','Bunker','Putting – short','Putting – lag',
+  'Putting – green reading','Course management','On-course play'];
+
+/* ---------- tiny helpers ---------- */
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const pct = (n,d) => d ? Math.round(n/d*100) : null;
+const fmtPct = v => v==null ? '—' : v + '%';
+const avg = a => a.length ? a.reduce((x,y)=>x+y,0)/a.length : null;
+const r1 = v => v==null ? '—' : (Math.round(v*10)/10).toFixed(1);
+const r2 = v => v==null ? '—' : (Math.round(v*100)/100).toFixed(2);
+const plus = v => (v>0?'+':'') + v;
+
+function expPutts(d){
+  if (d==null || d<=0) return 1;
+  if (d <= EXP_PUTTS[0][0]) return EXP_PUTTS[0][1];
+  for (let i=1;i<EXP_PUTTS.length;i++){
+    const [x1,y1] = EXP_PUTTS[i-1], [x2,y2] = EXP_PUTTS[i];
+    if (d <= x2) return y1 + (d-x1)*(y2-y1)/(x2-x1);
+  }
+  return EXP_PUTTS[EXP_PUTTS.length-1][1];
+}
+function puttBucket(d){ return PUTT_BUCKETS.find(b => d > b.lo - 0.0001 && d < b.hi) || PUTT_BUCKETS[0]; }
+
+let toastT;
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove('on'), 1900);
+}
+
+/* ---------- store ---------- */
+let DB = { rounds: [], practice: [], settings: { theme:'light', collapsed:{}, name:'' } };
+
+function load(){
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      DB.rounds   = Array.isArray(p.rounds) ? p.rounds : [];
+      DB.practice = Array.isArray(p.practice) ? p.practice : [];
+      DB.settings = Object.assign(DB.settings, p.settings || {});
+    }
+  } catch(e){ console.warn('load failed', e); }
+}
+let saveT;
+function save(){
+  clearTimeout(saveT);
+  saveT = setTimeout(()=>{
+    try { localStorage.setItem(KEY, JSON.stringify(DB)); }
+    catch(e){ toast('Storage full — export your data'); }
+  }, 120);
+}
+function saveNow(){ clearTimeout(saveT); try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
+
+/* ---------- model ---------- */
+function newHole(i, par){
+  return {
+    n:i+1, par: par || DEFAULT_PARS[i] || 4, score:null,
+    tee:  {club:'Driver', outcome:null, dir:null, offline:null, strike:[]},
+    app:  {state:null, dist:null, club:'', lie:null, zone:null, prox:null, strike:[]},
+    short:[], putts:[], mental:[], note:''
+  };
+}
+function newRound(m){
+  const prior = DB.rounds.filter(r => (r.course||'').toLowerCase() === (m.course||'').toLowerCase() && r.holes);
+  const pars  = prior.length ? prior[0].holes.map(h=>h.par) : DEFAULT_PARS;
+  return {
+    id: uid(), date: m.date, course: m.course, tees: m.tees,
+    wind: m.wind, temp: m.temp, conditions: m.conditions, feel: m.feel,
+    notes:'', finished:false, created: Date.now(),
+    holes: Array.from({length:18}, (_,i)=>newHole(i, pars[i]))
+  };
+}
+
+let cur = { roundId:null, hole:0 };
+const R = () => DB.rounds.find(r => r.id === cur.roundId) || null;
+const H = () => { const r = R(); return r ? r.holes[cur.hole] : null; };
+
+function holeTouched(h){
+  return h.score!=null || h.tee.outcome || h.app.state || h.putts.length || h.short.length || h.mental.length;
+}
+function roundTotal(r){
+  const s = r.holes.filter(h=>h.score!=null);
+  return s.length ? { strokes: s.reduce((a,h)=>a+h.score,0), par: s.reduce((a,h)=>a+h.par,0), n: s.length } : null;
+}
+function totalPutts(r){ return r.holes.reduce((a,h)=>a+h.putts.length,0); }
+
+/* ---------- navigation ---------- */
+let VIEW = 'round';
+function go(v){
+  VIEW = v;
+  $$('.view').forEach(x=>x.classList.remove('on'));
+  $('#view-'+v).classList.add('on');
+  $$('.nav button').forEach(b=>b.classList.toggle('on', b.dataset.nav===v));
+  window.scrollTo(0,0);
+  render();
+}
+function render(){
+  if (VIEW==='round')    renderRound();
+  if (VIEW==='stats')    renderStats();
+  if (VIEW==='practice') renderPractice();
+  if (VIEW==='data')     renderData();
+  const r = R();
+  $('#barTitle').textContent = r ? (r.course || 'Round') : 'Shot Tracker';
+  $('#barSub').textContent = r
+    ? (r.date + (r.tees ? ' · ' + r.tees : '') + (roundTotal(r) ? ' · ' + roundTotal(r).strokes + ' thru ' + roundTotal(r).n : ''))
+    : 'Adam Young method';
+}
+
+/* ---------- sheet ---------- */
+let sheetSave = null;
+function openSheet(title, html, onSave){
+  $('#sheetTitle').textContent = title;
+  $('#sheetBody').innerHTML = html;
+  sheetSave = onSave || null;
+  $('#sheet').classList.add('on'); $('#sheetBg').classList.add('on');
+  document.body.style.overflow='hidden';
+}
+function closeSheet(){
+  $('#sheet').classList.remove('on'); $('#sheetBg').classList.remove('on');
+  document.body.style.overflow='';
+  sheetSave = null;
+}
+
+/* ---------- UI builders ---------- */
+/* attr is 'act' for the main page and 'sact' for anything rendered inside the sheet */
+function segRow(act, opts, selected, attr){
+  const a = 'data-' + (attr || 'act');
+  const n = opts.length;
+  const cols = n<=2 ? 'c2' : (n===3 || n===5 || n===6) ? 'c3' : 'c4';
+  return '<div class="seg '+cols+'">' + opts.map(o=>{
+    /* NB: options may be plain strings — never read .sub/.cls off one, String.prototype
+       has legacy .sub()/.link() methods that would render as "function sub()". */
+    const obj = o !== null && typeof o === 'object';
+    const k = obj && o.k!==undefined ? o.k : o;
+    const label = obj && o.label!==undefined ? o.label : o;
+    const sub = obj && o.sub ? o.sub : null;
+    const cls = obj && o.cls ? o.cls : '';
+    const on = Array.isArray(selected) ? selected.indexOf(k)>-1 : selected===k;
+    return '<button '+a+'="'+act+'" data-v="'+esc(k)+'" class="'+(on?'on ':'')+cls+'">'
+      + label + (sub ? '<small>'+sub+'</small>' : '') + '</button>';
+  }).join('') + '</div>';
+}
+function chipRow(act, opts, selected, attr){
+  const a = 'data-' + (attr || 'act');
+  return '<div class="row">' + opts.map(o=>{
+    const obj = o !== null && typeof o === 'object';
+    const k = obj && o.k!==undefined ? o.k : o;
+    const label = obj && o.label!==undefined ? o.label : o;
+    const on = Array.isArray(selected) ? selected.indexOf(k)>-1 : selected===k;
+    return '<button class="chip'+(on?' on':'')+'" '+a+'="'+act+'" data-v="'+esc(k)+'">'+esc(label)+'</button>';
+  }).join('') + '</div>';
+}
+function selectEl(act, opts, val, blank){
+  return '<select data-act="'+act+'">' + (blank?'<option value="">'+esc(blank)+'</option>':'')
+    + opts.map(o=>'<option value="'+esc(o)+'"'+(o===val?' selected':'')+'>'+esc(o)+'</option>').join('') + '</select>';
+}
+function card(id, title, badge, body){
+  const col = DB.settings.collapsed[id] ? ' collapsed' : '';
+  return '<div class="card'+col+'" id="card-'+id+'">'
+    + '<div class="hd" data-act="toggle" data-v="'+id+'"><h3>'+title+'</h3>'
+    + (badge?'<span class="tick">'+badge+'</span>':'') + '<span class="chev">▼</span></div>'
+    + '<div class="bd">'+body+'</div></div>';
+}
+
+/* ================================================================
+   ROUND VIEW
+   ================================================================ */
+function renderRound(){
+  const r = R();
+  $('#roundWrap').innerHTML = r ? holeScreen(r) : startScreen();
+}
+
+function startScreen(){
+  const today = new Date().toISOString().slice(0,10);
+  const recent = DB.rounds.slice().sort((a,b)=>b.created-a.created);
+  const courses = Array.from(new Set(DB.rounds.map(r=>r.course).filter(Boolean)));
+  let h = card('new','Start a round','', ''
+    + '<div class="row"><div class="fld grow"><label>Date</label><input type="date" id="nrDate" value="'+today+'"></div></div>'
+    + '<div class="row"><div class="fld grow"><label>Course</label><input type="text" id="nrCourse" list="courseList" placeholder="Torrey Pines South" autocomplete="off"></div>'
+    + '<datalist id="courseList">'+courses.map(c=>'<option value="'+esc(c)+'">').join('')+'</datalist>'
+    + '<div class="fld" style="width:110px"><label>Tees</label><input type="text" id="nrTees" placeholder="Blue"></div></div>'
+    + '<div class="row"><div class="fld grow"><label>Wind</label>'
+    + '<select id="nrWind"><option value="">—</option><option>Calm</option><option>Light</option><option>Moderate</option><option>Strong</option></select></div>'
+    + '<div class="fld grow"><label>Conditions</label>'
+    + '<select id="nrCond"><option value="">—</option><option>Firm &amp; fast</option><option>Normal</option><option>Soft</option><option>Wet</option><option>Windy</option></select></div>'
+    + '<div class="fld" style="width:92px"><label>Temp °F</label><input type="number" id="nrTemp" inputmode="numeric" placeholder="72"></div></div>'
+    + '<div class="row"><span class="lbl">How you felt going in (1 rough → 5 sharp)</span>'
+    + segRow('nr-feel',[1,2,3,4,5],3)+'</div>'
+    + '<div class="row" style="margin-top:14px"><button class="btn full" data-act="start">Start round</button></div>'
+    + '<div class="note">Pars default to a standard 72 layout and copy from your last round at the same course. Change any hole’s par with one tap.</div>');
+
+  if (recent.length){
+    h += card('recent','Rounds','', recent.slice(0,25).map(rr=>{
+      const t = roundTotal(rr);
+      const rel = t ? t.strokes - t.par : null;
+      return '<div class="roundrow" data-act="open" data-v="'+rr.id+'">'
+        + '<div class="sc">'+(t?t.strokes:'—')+'</div>'
+        + '<div class="m"><b>'+esc(rr.course||'Round')+'</b><span>'+esc(rr.date)
+        + (t ? ' · ' + (rel===0?'E':plus(rel)) + ' · ' + t.n + ' holes' : ' · not started')
+        + (rr.finished?'':' · in progress') + '</span></div>'
+        + '<div class="del" data-act="del-round" data-v="'+rr.id+'">🗑</div></div>';
+    }).join(''));
+  } else {
+    h += '<div class="empty"><div class="big">⛳</div><h3>No rounds yet</h3>'
+      + '<p>Log errors off the tee and on approach, every putt in full, and the app works out where your shots are going.</p></div>';
+  }
+  return h;
+}
+
+function holeScreen(r){
+  const h = r.holes[cur.hole];
+  const isP3 = h.par === 3;
+  const t = roundTotal(r);
+
+  /* nav */
+  let out = '<div class="holenav">'
+    + '<button class="nb" data-act="prev">‹</button>'
+    + '<div class="mid"><div class="h">Hole '+h.n+'</div><div class="p">Par '+h.par
+    + (t ? ' · Round ' + t.strokes + ' (' + (t.strokes-t.par===0?'E':plus(t.strokes-t.par)) + ')' : '') + '</div></div>'
+    + '<button class="nb" data-act="next">›</button></div>';
+
+  out += '<div class="dots">' + r.holes.map((x,i)=>
+    '<button data-act="jump" data-v="'+i+'" class="'+(holeTouched(x)?'done ':'')+(i===cur.hole?'cur':'')+'">'
+    + (x.score!=null ? x.score : x.n) + '</button>').join('') + '</div>';
+
+  /* score */
+  const rel = h.score!=null ? h.score - h.par : null;
+  out += '<div class="card"><div class="bd">'
+    + '<div class="scorebar"><button class="step" data-act="sc" data-v="-1">−</button>'
+    + '<button class="val" data-act="sc-par" style="color:'+(h.score==null?'var(--muted)':'var(--ink)')+'">'
+    + (h.score!=null?h.score:h.par)+'</button>'
+    + '<button class="step" data-act="sc" data-v="1">+</button></div>'
+    + (h.score==null ? '<div class="sublbl" style="text-align:center;margin-top:-2px">tap the number for par, or step up and down</div>' : '')
+    + '<div class="row" style="justify-content:center;gap:8px">'
+    + (rel!=null ? '<span class="rel '+(rel<0?'under':rel>0?'over':'')+'">'+(rel===0?'Par':rel===-1?'Birdie':rel===-2?'Eagle':rel===1?'Bogey':rel===2?'Double':plus(rel))+'</span>' : '')
+    + '<span class="rel">'+h.putts.length+' putt'+(h.putts.length===1?'':'s')+'</span>'
+    + '</div>'
+    + '<div class="row" style="margin-top:12px"><span class="lbl">Par</span>'+segRow('par',[3,4,5],h.par)+'</div>'
+    + '<div class="row"><button class="btn ghost full" data-act="quickpar">Quick par — good tee shot, green in reg, 2 putts</button></div>'
+    + '</div></div>';
+
+  /* tee shot (par 4/5 only) */
+  if (!isP3){
+    const badge = h.tee.outcome ? (h.tee.outcome==='good'?'✓ good':'flagged') : '';
+    let b = '<div class="row"><span class="lbl">Result</span>'+segRow('tee-out',TEE_OUT,h.tee.outcome)+'</div>';
+    if (h.tee.outcome && h.tee.outcome!=='good'){
+      b += '<hr class="sep">'
+        + '<div class="row"><span class="lbl">Which way did it go?</span>'
+        + segRow('tee-dir',[{k:'L',label:'Left'},{k:'straight',label:'Straight'},{k:'R',label:'Right'}],h.tee.dir)+'</div>'
+        + '<div class="row"><span class="lbl">How far offline</span>'+segRow('tee-off',OFFLINE,h.tee.offline)+'</div>'
+        + '<div class="row"><span class="lbl">Strike (tap all that applied)</span>'+segRow('tee-strike',TEE_STRIKE,h.tee.strike)+'</div>';
+    }
+    b += '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Club off the tee</label>'
+      + selectEl('tee-club',CLUBS,h.tee.club)+'</div></div>';
+    out += card('tee','Tee shot',badge,b);
+  }
+
+  /* approach */
+  const appBadge = h.app.state==='gir' ? '✓ green' : h.app.state==='miss' ? 'missed' : h.app.state==='na' ? 'n/a' : '';
+  let ab = '<div class="row"><span class="lbl">'+(isP3?'Tee shot to the green':'Shot at the green')+'</span>'
+    + segRow('app-state',[
+        {k:'gir',label:'Green',   sub:'in regulation', cls:'ok'},
+        {k:'miss',label:'Missed', sub:'short of green', cls:'bad'},
+        {k:'na', label:'No shot', sub:'laid up / after penalty'}
+      ], h.app.state)+'</div>';
+
+  if (h.app.state==='gir' || h.app.state==='miss'){
+    ab += '<hr class="sep"><div class="row">'
+      + '<div class="fld" style="width:104px"><label>Yards in</label><input type="number" inputmode="numeric" data-act="app-dist" value="'+(h.app.dist??'')+'" placeholder="150"></div>'
+      + '<div class="fld grow"><label>Club</label>'+selectEl('app-club',CLUBS,h.app.club,'—')+'</div></div>'
+      + '<div class="row"><span class="lbl">Lie</span>'+segRow('app-lie',isP3?['Tee']:LIES.slice(1),h.app.lie)+'</div>';
+
+    if (h.app.state==='miss'){
+      ab += '<div class="row"><span class="lbl">Where did it end up?</span></div><div class="missgrid">'
+        + ZONES.map(z=>'<button data-act="app-zone" data-v="'+z.k+'" class="'
+          + (z.k==='GIR'?'centre ':'') + (h.app.zone===z.k?'on':'')+'">'+z.label+'</button>').join('')
+        + '</div>';
+    }
+    ab += '<div class="row" style="margin-top:12px">'
+      + '<div class="fld" style="width:120px"><label>'+(h.app.state==='gir'?'Feet from pin':'Yards from pin')+'</label>'
+      + '<input type="number" inputmode="numeric" data-act="app-prox" value="'+(h.app.prox??'')+'" placeholder="'+(h.app.state==='gir'?'22':'12')+'"></div></div>'
+      + '<div class="row"><span class="lbl">Strike</span>'+segRow('app-strike',APP_STRIKE,h.app.strike)+'</div>';
+  }
+  out += card('app','Approach',appBadge,ab);
+
+  /* short game */
+  let sb = h.short.length ? h.short.map((s,i)=>
+    '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
+    + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')+'</b>'
+    + '<em>'+(s.prox!=null?'to '+s.prox+' ft':'proximity not logged')
+    + (s.strike && s.strike.length ? ' · '+s.strike.join(', ') : '')+'</em></div>'
+    + '<button class="del" data-act="edit-short" data-v="'+i+'">✎</button>'
+    + '<button class="del" data-act="del-short" data-v="'+i+'">🗑</button></div>').join('') : '';
+  sb += '<button class="btn ghost full" data-act="add-short">+ Add short-game shot</button>';
+  out += card('short','Short game <span style="text-transform:none;letter-spacing:0">(inside 50y)</span>', h.short.length?h.short.length+'':'', sb);
+
+  /* putting */
+  let pb = '';
+  if (h.putts.length){
+    pb += h.putts.map((p,i)=>{
+      const brk = (BREAKS.find(b=>b.k===p.brk)||{}).label || '';
+      const slp = (SLOPES.find(s=>s.k===p.slope)||{}).label || '';
+      return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
+        + '<b>'+p.dist+' ft '+(p.holed?'<span class="holed">— holed</span>':'— to '+(p.rem!=null?p.rem+' ft':'?'))+'</b>'
+        + '<em>'+[brk,slp].filter(Boolean).join(' · ')
+        + (p.miss && p.miss.length ? ' · missed '+p.miss.join(', ').toLowerCase() : '')+'</em></div>'
+        + '<button class="del" data-act="edit-putt" data-v="'+i+'">✎</button>'
+        + '<button class="del" data-act="del-putt" data-v="'+i+'">🗑</button></div>';
+    }).join('');
+    const first = h.putts[0];
+    if (first && h.putts.length){
+      const sg = expPutts(first.dist) - h.putts.length;
+      pb += '<div class="note">First putt '+first.dist+' ft → '+h.putts.length+' putt'+(h.putts.length===1?'':'s')
+        + '. Strokes gained putting <b style="color:'+(sg>=0?'var(--good-ink)':'var(--crit)')+'">'+plus(r2(sg))+'</b> '
+        + '(tour baseline from '+first.dist+' ft is '+r2(expPutts(first.dist))+').</div>';
+    }
+  }
+  pb += '<button class="btn ghost full" data-act="add-putt" style="margin-top:'+(h.putts.length?'8px':'0')+'">+ Add putt</button>';
+  out += card('putt','Putting', h.putts.length?h.putts.length+'':'', pb);
+
+  /* mental */
+  let mb = chipRow('mental',MENTAL,h.mental)
+    + '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Strategy / note for this hole</label>'
+    + '<textarea data-act="hole-note" placeholder="What was the decision, and would you make it again?">'+esc(h.note)+'</textarea></div></div>';
+  out += card('mental','Mental &amp; strategy', h.mental.length?h.mental.length+'':'', mb);
+
+  /* footer */
+  out += '<div class="row" style="margin:16px 0 8px">'
+    + '<button class="btn ghost grow" data-act="exit">Round list</button>'
+    + '<button class="btn grow" data-act="finish">'+(r.finished?'Round summary':'Finish round')+'</button></div>';
+
+  return out;
+}
+
+/* ---------- putt sheet ---------- */
+let tmp = null;
+function puttSheet(idx){
+  const h = H();
+  tmp = idx==null
+    ? {dist:null, brk:null, slope:null, holed:null, rem:null, miss:[]}
+    : JSON.parse(JSON.stringify(h.putts[idx]));
+  tmp._i = idx;
+  drawPuttSheet();
+}
+function drawPuttSheet(){
+  const p = tmp;
+  let b = '<div class="row"><span class="lbl">Putt length (feet)</span>'
+    + '<div class="row" style="gap:6px">' + PUTT_QUICK.map(d=>
+        '<button class="chip sm'+(p.dist===d?' on':'')+'" data-sact="dist" data-v="'+d+'">'+d+'</button>').join('')
+    + '</div></div>'
+    + '<div class="row"><div class="fld" style="width:130px"><label>Or type it</label>'
+    + '<input type="number" inputmode="numeric" data-sact="distin" value="'+(p.dist??'')+'" placeholder="ft"></div></div>'
+    + '<hr class="sep">'
+    + '<div class="row"><span class="lbl">Break</span>'+segRow('sBrk',BREAKS,p.brk,'sact')+'</div>'
+    + '<div class="row"><span class="lbl">Slope</span>'+segRow('sSlope',SLOPES,p.slope,'sact')+'</div>'
+    + '<hr class="sep">'
+    + '<div class="row"><span class="lbl">Result</span>'
+    + segRow('sHoled',[{k:'yes',label:'Holed',cls:'ok'},{k:'no',label:'Missed',cls:'bad'}], p.holed===true?'yes':p.holed===false?'no':null,'sact')+'</div>';
+  if (p.holed===false){
+    b += '<div class="row"><div class="fld" style="width:150px"><label>Left yourself (feet)</label>'
+      + '<input type="number" inputmode="numeric" data-sact="rem" value="'+(p.rem??'')+'" placeholder="ft"></div></div>'
+      + '<div class="row"><span class="lbl">Why it missed</span>'+segRow('sMiss',PUTT_MISS,p.miss,'sact')+'</div>';
+  }
+  b += '<div class="row" style="margin-top:16px">'
+    + '<button class="btn full" data-sact="save"'+(p.dist==null||p.holed==null?' disabled':'')+'>Save putt</button></div>';
+  openSheet(tmp._i==null?'Add putt':'Edit putt', b);
+}
+
+/* ---------- short game sheet ---------- */
+function shortSheet(idx){
+  const h = H();
+  tmp = idx==null ? {dist:null, lie:null, strike:[], prox:null, ud:null} : JSON.parse(JSON.stringify(h.short[idx]));
+  tmp._i = idx;
+  drawShortSheet();
+}
+function drawShortSheet(){
+  const s = tmp;
+  const b = '<div class="row"><div class="fld" style="width:130px"><label>Yards to pin</label>'
+    + '<input type="number" inputmode="numeric" data-sact="sgdist" value="'+(s.dist??'')+'" placeholder="25"></div></div>'
+    + '<div class="row"><span class="lbl">Lie</span>'+segRow('sgLie',SG_LIES,s.lie,'sact')+'</div>'
+    + '<div class="row"><span class="lbl">Strike</span>'+segRow('sgStrike',SG_STRIKE,s.strike,'sact')+'</div>'
+    + '<div class="row"><div class="fld" style="width:150px"><label>Finished (feet from pin)</label>'
+    + '<input type="number" inputmode="numeric" data-sact="sgprox" value="'+(s.prox??'')+'" placeholder="8"></div></div>'
+    + '<div class="row" style="margin-top:16px">'
+    + '<button class="btn full" data-sact="sgsave"'+(s.dist==null?' disabled':'')+'>Save shot</button></div>';
+  openSheet(tmp._i==null?'Add short-game shot':'Edit shot', b);
+}
+
+/* ---------- round summary ---------- */
+function finishRound(){
+  const r = R(); if(!r) return;
+  r.finished = true; save();
+  const t = roundTotal(r) || {strokes:0,par:0,n:0};
+  const s = summarise([r]);
+  const b = '<div class="tiles">'
+    + tile('Score', t.strokes, (t.strokes-t.par===0?'E':plus(t.strokes-t.par)) + ' · ' + t.n + ' holes')
+    + tile('Putts', totalPutts(r), s.threePutts + ' three-putt' + (s.threePutts===1?'':'s'))
+    + tile('Drives in play', fmtPct(s.inPlayPct), s.teeLogged + ' tee shots')
+    + tile('Greens', fmtPct(s.girPct), s.girN + ' of ' + s.appN)
+    + '</div>'
+    + '<div class="row"><div class="fld grow"><label>Round notes</label>'
+    + '<textarea data-sact="rnote" placeholder="What was the story of the round?">'+esc(r.notes||'')+'</textarea></div></div>'
+    + (s.leaks.length ? '<hr class="sep"><h4 style="margin-bottom:8px">Biggest leaks this round</h4>'
+        + s.leaks.slice(0,3).map((l,i)=>leakRow(l,i)).join('') : '')
+    + '<div class="row" style="margin-top:16px"><button class="btn ghost grow" data-sact="close">Keep editing</button>'
+    + '<button class="btn grow" data-sact="closeout">Done</button></div>';
+  openSheet('Round summary — ' + (r.course||''), b);
+}
+function tile(k,v,d,cls){
+  return '<div class="tile"><div class="k">'+k+'</div><div class="v">'+v+'</div>'
+    + (d?'<div class="d '+(cls||'')+'">'+d+'</div>':'')+'</div>';
+}
+/* ================================================================
+   STATS ENGINE
+   ================================================================ */
+const COST = { penalty:1.1, trouble:0.6, blocked:0.35, fatThin:0.45, shortMiss:0.25, failedUD:0.45, mental:0.5 };
+
+function summarise(rounds){
+  const S = {
+    rounds: rounds.length, holes:0, scored:0, strokes:0, parTotal:0,
+    teeLogged:0, teeGood:0, teeBlocked:0, teeTrouble:0, teePenalty:0,
+    teeDir:{L:0,R:0,straight:0}, teeOff:{}, teeStrike:{},
+    appN:0, girN:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
+    shortN:0, sgLie:{}, sgStrike:{}, sgProx:[], udAtt:0, udMade:0, scrAtt:0, scrMade:0,
+    putts:0, threePutts:0, onePutts:0, sgPutt:0, sgPuttHoles:0,
+    bucket:{}, breakMake:{}, puttMiss:{}, lagFrom:[], lagLeft:[],
+    mental:{}, perRound:[], leaks:[]
+  };
+  OFFLINE.forEach(k=>S.teeOff[k]=0);
+  TEE_STRIKE.forEach(k=>S.teeStrike[k]=0);
+  APP_STRIKE.forEach(k=>S.appStrike[k]=0);
+  ZONES.forEach(z=>S.zones[z.k]=0);
+  PUTT_BUCKETS.forEach(b=>S.bucket[b.k]={n:0,made:0,base:b.base});
+  BREAKS.forEach(b=>S.breakMake[b.k]={n:0,made:0});
+  PUTT_MISS.forEach(k=>S.puttMiss[k]=0);
+  MENTAL.forEach(k=>S.mental[k]=0);
+  SG_LIES.forEach(k=>S.sgLie[k]={n:0,prox:[]});
+
+  rounds.forEach(r=>{
+    const rs = { id:r.id, date:r.date, course:r.course, strokes:0, par:0, n:0, sgPutt:0, putts:0, gir:0, girN:0, inPlay:0, teeN:0 };
+    r.holes.forEach(h=>{
+      const played = holeTouched(h);
+      if (!played) return;
+      S.holes++;
+      if (h.score!=null){ S.scored++; S.strokes+=h.score; S.parTotal+=h.par; rs.strokes+=h.score; rs.par+=h.par; rs.n++; }
+
+      /* tee */
+      if (h.par!==3 && h.tee.outcome){
+        S.teeLogged++; rs.teeN++;
+        if (h.tee.outcome==='good'){ S.teeGood++; rs.inPlay++; }
+        if (h.tee.outcome==='blocked'){ S.teeBlocked++; rs.inPlay++; }
+        if (h.tee.outcome==='trouble') S.teeTrouble++;
+        if (h.tee.outcome==='penalty') S.teePenalty++;
+        if (h.tee.dir) S.teeDir[h.tee.dir]=(S.teeDir[h.tee.dir]||0)+1;
+        if (h.tee.offline) S.teeOff[h.tee.offline]=(S.teeOff[h.tee.offline]||0)+1;
+        (h.tee.strike||[]).forEach(k=>S.teeStrike[k]=(S.teeStrike[k]||0)+1);
+      }
+
+      /* approach */
+      if (h.app.state==='gir' || h.app.state==='miss'){
+        S.appN++; rs.girN++;
+        const band = h.app.dist==null ? null : h.app.dist<100?'<100y':h.app.dist<125?'100–125y':h.app.dist<150?'125–150y':h.app.dist<175?'150–175y':h.app.dist<200?'175–200y':'200y+';
+        if (band){ S.appDistBand[band] = S.appDistBand[band] || {n:0,gir:0}; S.appDistBand[band].n++; }
+        if (h.app.state==='gir'){
+          S.girN++; rs.gir++;
+          if (band) S.appDistBand[band].gir++;
+          if (h.app.prox!=null) S.appProx.push(h.app.prox);
+        } else if (h.app.zone){ S.zones[h.app.zone]=(S.zones[h.app.zone]||0)+1; }
+        (h.app.strike||[]).forEach(k=>S.appStrike[k]=(S.appStrike[k]||0)+1);
+      }
+
+      /* scrambling */
+      if (h.app.state==='miss' && h.score!=null){
+        S.scrAtt++; if (h.score<=h.par) S.scrMade++;
+      }
+
+      /* short game */
+      h.short.forEach(s=>{
+        S.shortN++;
+        if (s.lie){ S.sgLie[s.lie]=S.sgLie[s.lie]||{n:0,prox:[]}; S.sgLie[s.lie].n++; if(s.prox!=null) S.sgLie[s.lie].prox.push(s.prox); }
+        (s.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
+        if (s.prox!=null) S.sgProx.push(s.prox);
+      });
+      if (h.app.state==='miss' && h.short.length){
+        S.udAtt++; if (h.short.length + h.putts.length <= 2) S.udMade++;
+      }
+
+      /* putting */
+      if (h.putts.length){
+        S.putts += h.putts.length; rs.putts += h.putts.length;
+        if (h.putts.length>=3) S.threePutts++;
+        if (h.putts.length===1) S.onePutts++;
+        const first = h.putts[0];
+        if (first && first.dist!=null){
+          const sg = expPutts(first.dist) - h.putts.length;
+          S.sgPutt += sg; rs.sgPutt += sg; S.sgPuttHoles++;
+          if (first.dist>=20){ S.lagFrom.push(first.dist); S.lagLeft.push(first.holed?0:(h.putts[1]?h.putts[1].dist:(first.rem??null))); }
+        }
+        h.putts.forEach(p=>{
+          if (p.dist==null) return;
+          const b = puttBucket(p.dist);
+          S.bucket[b.k].n++; if (p.holed) S.bucket[b.k].made++;
+          if (p.dist<=10 && p.brk){ S.breakMake[p.brk].n++; if(p.holed) S.breakMake[p.brk].made++; }
+          if (!p.holed) (p.miss||[]).forEach(k=>S.puttMiss[k]=(S.puttMiss[k]||0)+1);
+        });
+      }
+
+      (h.mental||[]).forEach(k=>S.mental[k]=(S.mental[k]||0)+1);
+    });
+    if (rs.n) S.perRound.push(rs);
+  });
+
+  S.perRound.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  S.inPlayPct = pct(S.teeGood + S.teeBlocked, S.teeLogged);
+  S.clearPct  = pct(S.teeGood, S.teeLogged);
+  S.girPct    = pct(S.girN, S.appN);
+  S.scrPct    = pct(S.scrMade, S.scrAtt);
+  S.udPct     = pct(S.udMade, S.udAtt);
+  S.avgScore  = S.scored ? S.strokes / S.rounds : null;
+  S.toPar     = S.scored ? (S.strokes - S.parTotal) : null;
+  S.puttsPerRound = S.rounds ? S.putts / S.rounds : null;
+  S.sgPuttPerRound = S.rounds ? S.sgPutt / S.rounds : null;
+  S.avgProx   = avg(S.appProx);
+  S.avgLagLeft= avg(S.lagLeft.filter(x=>x!=null));
+  S.leaks     = buildLeaks(S);
+  return S;
+}
+
+function buildLeaks(S){
+  const n = Math.max(S.rounds,1), L = [];
+  const push = (cost,title,stat,fix) => { if (cost>0.05) L.push({cost,title,stat,fix}); };
+
+  push(S.teePenalty*COST.penalty/n, 'Penalty shots off the tee',
+    S.teePenalty+' penalty tee shot'+(S.teePenalty===1?'':'s')+' over '+S.rounds+' round'+(S.rounds===1?'':'s')
+      +' — '+fmtPct(pct(S.teePenalty,S.teeLogged))+' of drives.',
+    'Nothing else on this list is worth touching until the ball stays in bounds. Widen the target, take less club where trouble is one-sided.');
+
+  push(S.teeTrouble*COST.trouble/n, 'Drives leaving no shot at the green',
+    S.teeTrouble+' recovery-only tee shot'+(S.teeTrouble===1?'':'s')+'; clear shot to the green on only '+fmtPct(S.clearPct)+' of drives.',
+    'Track the miss pattern below. If it is one-sided, aim off it rather than trying to fix it mid-round.');
+
+  push(S.teeBlocked*COST.blocked/n, 'In play but blocked',
+    S.teeBlocked+' drive'+(S.teeBlocked===1?'':'s')+' in play with no clear shot.',
+    'This is usually a strategy leak, not a swing leak — check which side of the fairway you are starting from.');
+
+  const worstStrike = Object.entries(S.teeStrike).sort((a,b)=>b[1]-a[1])[0];
+  if (worstStrike && worstStrike[1]>=3)
+    push(worstStrike[1]*0.3/n, worstStrike[0].toLowerCase()+' strikes with the driver',
+      worstStrike[1]+' logged '+worstStrike[0].toLowerCase()+' strike'+(worstStrike[1]===1?'':'s')+'.',
+      'Face-tape or foot-spray the driver and run Adam Young’s strike drills — this is the Strike Plan material.');
+
+  const fatThin = (S.appStrike['Fat']||0) + (S.appStrike['Thin']||0);
+  push(fatThin*COST.fatThin/n, 'Ground contact on approach shots',
+    fatThin+' fat or thin approach'+(fatThin===1?'':'es')+' logged.',
+    'Ground contact costs more distance than face strike. Low-point control drills before anything technical.');
+
+  const shortMiss = (S.zones['S']||0)+(S.zones['SL']||0)+(S.zones['SR']||0);
+  const longMiss  = (S.zones['L']||0)+(S.zones['LL']||0)+(S.zones['LR']||0);
+  if (shortMiss >= longMiss*2 && shortMiss>=4)
+    push(shortMiss*COST.shortMiss/n, 'Approaches finishing short',
+      shortMiss+' short misses against '+longMiss+' long — you are systematically under-clubbing.',
+      'Chart your real carry numbers, not your best ones, and play to the middle of the green.');
+
+  if (S.sgPuttPerRound!=null && S.sgPuttPerRound < -0.5)
+    push(-S.sgPuttPerRound, 'Putting',
+      'Losing '+r1(-S.sgPuttPerRound)+' strokes a round on the greens against the tour baseline. '
+      + S.threePutts+' three-putt'+(S.threePutts===1?'':'s')+'.',
+      'Check the make-rate chart to see whether the leak is short putts or lag speed — they need different practice.');
+
+  if (S.udAtt>=4 && S.udPct!=null && S.udPct<45)
+    push((S.udAtt-S.udMade)*COST.failedUD/n, 'Getting up and down',
+      'Converted '+S.udMade+' of '+S.udAtt+' ('+fmtPct(S.udPct)+') when you missed the green.',
+      'Proximity is the whole game here — log where the chips finish and practise to a landing spot, not a technique.');
+
+  Object.entries(S.mental).filter(([,v])=>v>=3).forEach(([k,v])=>
+    push(v*COST.mental/n, k, v+' occurrence'+(v===1?'':'s')+' across '+S.rounds+' round'+(S.rounds===1?'':'s')+'.',
+      'Mental faults are the cheapest strokes on this list to buy back — they need a decision routine, not a range session.'));
+
+  return L.sort((a,b)=>b.cost-a.cost);
+}
+
+function leakRow(l,i){
+  return '<div class="leak p'+(i+1)+'"><div class="rank">'+(i+1)+'</div><div>'
+    + '<div class="t">'+esc(l.title)+' <span style="color:var(--muted);font-weight:600">· ~'+r1(l.cost)+' shots/round</span></div>'
+    + '<div class="s">'+esc(l.stat)+'</div><div class="fix">'+esc(l.fix)+'</div></div></div>';
+}
+
+/* ================================================================
+   CHARTS (hand-rolled SVG — no dependencies, works offline)
+   ================================================================ */
+const CHW = 6.3;                       /* ~char width at the 11px chart font */
+const trunc = (t, px) => { const n = Math.floor(px/CHW); return t.length>n ? t.slice(0,Math.max(1,n-1))+'\u2026' : t; };
+
+function hbar(rows, opts){
+  opts = opts || {};
+  const max = Math.max(1, ...rows.map(r=>r.v));
+  const txt = rows.map(r => String(r.t!=null ? r.t : r.v));
+  const LW = opts.labelW || 108;
+  const RW = Math.max(28, Math.max.apply(null, txt.map(t=>t.length))*CHW + 12);
+  const BH = 26, GAP = 7, W = 480, TW = W-LW-RW;
+  const H = rows.length*(BH+GAP) + 4;
+  let s = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(opts.aria||'')+'">';
+  rows.forEach((r,i)=>{
+    const y = i*(BH+GAP)+2, w = Math.max(r.v>0?3:0, TW * r.v/max);
+    const fill = r.fill || 'var(--s1)';
+    s += '<text class="lab" x="0" y="'+(y+BH/2+4)+'">'+esc(trunc(String(r.k), LW-8))+'<title>'+esc(r.k)+'</title></text>';
+    s += '<rect class="mk" x="'+LW+'" y="'+y+'" width="'+w+'" height="'+BH+'" rx="4" fill="'+fill+'"><title>'+esc(r.k)+': '+esc(txt[i])+'</title></rect>';
+    s += '<text class="val" x="'+(LW+w+8)+'" y="'+(y+BH/2+4)+'">'+esc(txt[i])+'</text>';
+  });
+  return s + '</svg>';
+}
+
+function groupedBar(cats, series, opts){
+  opts = opts||{};
+  const W=480, H=200, PL=34, PB=34, PT=8, PR=6;
+  const iw = W-PL-PR, ih = H-PB-PT;
+  const max = opts.max!=null ? opts.max : Math.max(1, ...series.flatMap(s=>s.v));
+  const gw = iw/cats.length, bw = Math.min(20, (gw-8)/series.length);
+  let s = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(opts.aria||'')+'">';
+  for (let g=0; g<=4; g++){
+    const y = PT + ih - ih*g/4;
+    s += '<line class="gl" x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'"/>';
+    s += '<text x="'+(PL-7)+'" y="'+(y+4)+'" text-anchor="end">'+Math.round(max*g/4)+(opts.suffix||'')+'</text>';
+  }
+  cats.forEach((c,i)=>{
+    const cx = PL + gw*i + gw/2;
+    series.forEach((se,j)=>{
+      const v = se.v[i]; if (v==null) return;
+      const h = ih * Math.max(0,v)/max;
+      const x = cx - (series.length*bw + (series.length-1)*3)/2 + j*(bw+3);
+      s += '<rect class="mk" x="'+x+'" y="'+(PT+ih-h)+'" width="'+bw+'" height="'+Math.max(h,1)+'" rx="4" fill="'+se.fill+'">'
+         + '<title>'+esc(se.name)+' · '+esc(c)+': '+v+(opts.suffix||'')+'</title></rect>';
+    });
+    s += '<text x="'+cx+'" y="'+(H-PB+16)+'" text-anchor="middle">'+esc(c)+'</text>';
+  });
+  s += '<line class="ax" x1="'+PL+'" y1="'+(PT+ih)+'" x2="'+(W-PR)+'" y2="'+(PT+ih)+'"/>';
+  return s+'</svg>';
+}
+
+function divBar(rows, opts){
+  opts = opts||{};
+  const W=480, BH=24, GAP=8, PL=92, PR=54;
+  const H = rows.length*(BH+GAP)+8;
+  const max = Math.max(0.5, ...rows.map(r=>Math.abs(r.v)));
+  const mid = PL + (W-PL-PR)/2, half = (W-PL-PR)/2;
+  let s = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(opts.aria||'')+'">';
+  s += '<line class="ax" x1="'+mid+'" y1="0" x2="'+mid+'" y2="'+(H-4)+'"/>';
+  rows.forEach((r,i)=>{
+    const y=i*(BH+GAP)+2, w = half*Math.abs(r.v)/max;
+    const x = r.v>=0 ? mid : mid-w;
+    const fill = r.v>=0 ? 'var(--s1)' : 'var(--s8)';
+    s += '<text class="lab" x="0" y="'+(y+BH/2+4)+'">'+esc(trunc(String(r.k), PL-10))+'<title>'+esc(r.k)+'</title></text>';
+    s += '<rect class="mk" x="'+x+'" y="'+y+'" width="'+Math.max(w,2)+'" height="'+BH+'" rx="4" fill="'+fill+'"><title>'+esc(r.k)+': '+plus(r2(r.v))+'</title></rect>';
+    s += '<text class="val" x="'+(r.v>=0 ? x+w+8 : x-8)+'" y="'+(y+BH/2+4)+'" text-anchor="'+(r.v>=0?'start':'end')+'">'+plus(r2(r.v))+'</text>';
+  });
+  return s+'</svg>';
+}
+
+function lineChart(pts, opts){
+  opts = opts||{};
+  if (pts.length<2) return '<div class="note">Two or more rounds needed for a trend.</div>';
+  const W=480,H=180,PL=32,PB=28,PT=10,PR=10;
+  const iw=W-PL-PR, ih=H-PB-PT;
+  const vals = pts.map(p=>p.v);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (hi===lo){ hi+=1; lo-=1; }
+  const pad = (hi-lo)*0.15; lo-=pad; hi+=pad;
+  const X = i => PL + iw*(pts.length===1?0.5:i/(pts.length-1));
+  const Y = v => PT + ih - ih*(v-lo)/(hi-lo);
+  let s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(opts.aria||'')+'">';
+  for(let g=0;g<=3;g++){
+    const y=PT+ih-ih*g/3, v=lo+(hi-lo)*g/3;
+    s+='<line class="gl" x1="'+PL+'" y1="'+y+'" x2="'+(W-PR)+'" y2="'+y+'"/>';
+    s+='<text x="'+(PL-6)+'" y="'+(y+4)+'" text-anchor="end">'+Math.round(v)+'</text>';
+  }
+  s+='<path d="'+pts.map((p,i)=>(i?'L':'M')+X(i)+' '+Y(p.v)).join(' ')+'" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  pts.forEach((p,i)=>{
+    s+='<circle cx="'+X(i)+'" cy="'+Y(p.v)+'" r="4.5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"><title>'+esc(p.k)+': '+esc(p.t||p.v)+'</title></circle>';
+  });
+  const last=pts[pts.length-1];
+  s+='<text class="val" x="'+(X(pts.length-1))+'" y="'+(Y(last.v)-11)+'" text-anchor="end">'+esc(last.t||last.v)+'</text>';
+  pts.forEach((p,i)=>{ if(pts.length<=8 || i===0 || i===pts.length-1)
+    s+='<text x="'+X(i)+'" y="'+(H-PB+16)+'" text-anchor="'+(i===0?'start':i===pts.length-1?'end':'middle')+'">'+esc(p.k)+'</text>'; });
+  return s+'</svg>';
+}
+
+function heatGrid(zones){
+  const vals = ZONES.filter(z=>z.k!=='GIR').map(z=>zones[z.k]||0);
+  const max = Math.max(1,...vals);
+  const steps = ['var(--seq1)','var(--seq2)','var(--seq3)','var(--seq4)','var(--seq5)','var(--seq6)'];
+  let s = '<div class="missgrid" style="max-width:300px">';
+  ZONES.forEach(z=>{
+    if (z.k==='GIR'){ s += '<button class="centre" disabled>⛳</button>'; return; }
+    const v = zones[z.k]||0;
+    const idx = v===0 ? -1 : Math.min(5, Math.floor(v/max*5.999));
+    const bg = idx<0 ? 'var(--surface)' : steps[idx];
+    const ink = idx>=3 ? '#fff' : 'var(--ink-2)';
+    s += '<button disabled style="background:'+bg+';color:'+ink+';border-color:var(--border);font-size:11px">'
+      + '<span><b style="font-size:17px;display:block;font-variant-numeric:tabular-nums">'+v+'</b>'+z.label+'</span></button>';
+  });
+  return s+'</div>';
+}
+
+function tableView(head, rows){
+  return '<details class="tblwrap"><summary>Show the numbers</summary><table class="tbl"><thead><tr>'
+    + head.map(h=>'<th>'+esc(h)+'</th>').join('') + '</tr></thead><tbody>'
+    + rows.map(r=>'<tr>'+r.map(c=>'<td>'+c+'</td>').join('')+'</tr>').join('')
+    + '</tbody></table></details>';
+}
+function box(title, cap, chart, table){
+  return '<div class="chartbox"><h4>'+title+'</h4><div class="cap">'+cap+'</div>'+chart+(table||'')+'</div>';
+}
+function legend(items){
+  return '<div class="legend">'+items.map(i=>'<span><i style="background:'+i.c+'"></i>'+esc(i.n)+'</span>').join('')+'</div>';
+}
+
+/* ---------- stats view ---------- */
+let statFilter = 'all';
+function renderStats(){
+  const all = DB.rounds.filter(r=>roundTotal(r));
+  if (!all.length){
+    $('#statsWrap').innerHTML = '<div class="empty"><div class="big">◧</div><h3>No data yet</h3>'
+      + '<p>Play a round and log it — the charts and the practice priority list build themselves from what you enter.</p></div>';
+    return;
+  }
+  const sorted = all.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const sel = statFilter==='all' ? sorted : statFilter==='5' ? sorted.slice(0,5) : statFilter==='10' ? sorted.slice(0,10) : sorted.filter(r=>r.id===statFilter);
+  const S = summarise(sel);
+
+  let h = '<div class="row" style="margin-bottom:12px">'
+    + chipRow('filter',[{k:'all',label:'All ('+all.length+')'},{k:'10',label:'Last 10'},{k:'5',label:'Last 5'}], ['all','10','5'].indexOf(statFilter)>-1?statFilter:null)
+    + '</div>';
+
+  /* headline tiles */
+  const relPer = S.rounds ? (S.strokes - S.parTotal)/S.rounds : null;
+  h += '<div class="tiles">'
+    + tile('Scoring average', S.avgScore==null?'—':r1(S.avgScore), relPer==null?'':plus(r1(relPer))+' to par · '+S.rounds+' round'+(S.rounds===1?'':'s'))
+    + tile('Drives in play', fmtPct(S.inPlayPct), 'Clear shot to green '+fmtPct(S.clearPct))
+    + tile('Greens in reg', fmtPct(S.girPct), S.girN+' of '+S.appN+(S.avgProx?' · '+r1(S.avgProx)+' ft avg':''))
+    + tile('Putts per round', S.puttsPerRound==null?'—':r1(S.puttsPerRound), S.threePutts+' three-putt'+(S.threePutts===1?'':'s')+' · '+S.onePutts+' one-putt'+(S.onePutts===1?'':'s'))
+    + tile('SG putting', S.sgPuttPerRound==null?'—':plus(r2(S.sgPuttPerRound)), 'per round vs tour baseline', S.sgPuttPerRound>=0?'pos':'neg')
+    + tile('Scrambling', fmtPct(S.scrPct), S.scrMade+' of '+S.scrAtt+' missed greens saved')
+    + '</div>';
+
+  /* practice priority */
+  h += '<div class="card"><div class="hd"><h3>Where your shots are going</h3></div><div class="bd">';
+  if (S.leaks.length){
+    h += S.leaks.slice(0,5).map((l,i)=>leakRow(l,i)).join('');
+    h += '<div class="note">Cost estimates are rough: a penalty tee shot is charged '+COST.penalty+' shots, a recovery '+COST.trouble+
+      ', a fat or thin approach '+COST.fatThin+', a mental fault '+COST.mental+'. Putting uses real strokes-gained. '
+      + 'The ranking is what matters, not the decimals.</div>';
+  } else {
+    h += '<div class="note">Nothing is standing out yet — log a few more rounds and the ranking gets meaningful.</div>';
+  }
+  h += '</div></div>';
+
+  /* ---- driving ---- */
+  const teeRows = [
+    {k:'Good', v:S.teeGood, fill:'var(--seq6)'},
+    {k:'Blocked', v:S.teeBlocked, fill:'var(--seq5)'},
+    {k:'Recovery', v:S.teeTrouble, fill:'var(--seq4)'},
+    {k:'Penalty', v:S.teePenalty, fill:'var(--seq3)'}
+  ].map(r=>Object.assign(r,{t:r.v+' ('+fmtPct(pct(r.v,S.teeLogged))+')'}));
+
+  h += '<div class="card"><div class="hd"><h3>Off the tee</h3></div><div class="bd">';
+  if (S.teeLogged){
+    h += box('Where every drive finished',
+      'Ordered best to worst. “In play” is the first two bars — '+fmtPct(S.inPlayPct)+' of '+S.teeLogged+' tee shots on par 4s and 5s.',
+      hbar(teeRows,{labelW:80,aria:'Tee shot outcomes'}),
+      tableView(['Result','Drives','Share'], teeRows.map(r=>[esc(r.k), r.v, fmtPct(pct(r.v,S.teeLogged))])));
+
+    const dirRows = [{k:'Left',v:S.teeDir.L||0},{k:'Straight',v:S.teeDir.straight||0},{k:'Right',v:S.teeDir.R||0}];
+    const offRows = OFFLINE.map(k=>({k, v:S.teeOff[k]||0}));
+    const strRows = TEE_STRIKE.map(k=>({k, v:S.teeStrike[k]||0}));
+    if (dirRows.some(r=>r.v)) h += box('Which way the misses went','Only logged when the drive was not good, so this is the shape of your bad ones.',hbar(dirRows,{labelW:70,aria:'Miss direction'}));
+    if (offRows.some(r=>r.v)) h += box('How far offline','Anything past 25 yards is where clear shots to the green start disappearing.',hbar(offRows,{labelW:80,aria:'Distance offline'}));
+    if (strRows.some(r=>r.v)) h += box('Strike location','Face contact on the drives that cost you. A one-sided pattern here is a Strike Plan job.',hbar(strRows,{labelW:60,aria:'Driver strike'}));
+  } else h += '<div class="note">No tee shots logged yet.</div>';
+  h += '</div></div>';
+
+  /* ---- approach ---- */
+  h += '<div class="card"><div class="hd"><h3>Approach play</h3></div><div class="bd">';
+  if (S.appN){
+    h += box('Where you miss greens',
+      'Darker means more misses. '+S.girN+' of '+S.appN+' approaches found the green ('+fmtPct(S.girPct)+').',
+      heatGrid(S.zones),
+      tableView(['Zone','Misses'], ZONES.filter(z=>z.k!=='GIR').map(z=>[z.label.replace('<br>',' '), S.zones[z.k]||0])));
+
+    const appStr = APP_STRIKE.map(k=>({k,v:S.appStrike[k]||0}));
+    if (appStr.some(r=>r.v)) h += box('Contact on the misses','Fat and thin are ground contact; toe and heel are face contact. They are different problems with different fixes.',hbar(appStr,{labelW:60,aria:'Approach strike'}));
+
+    const bands = Object.entries(S.appDistBand).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
+    if (bands.length) h += box('Greens hit by distance','Where your effective range ends.',
+      hbar(bands.map(([k,v])=>({k, v: pct(v.gir,v.n)||0, t:fmtPct(pct(v.gir,v.n))+' ('+v.gir+'/'+v.n+')'})),{labelW:80,aria:'GIR by distance'}));
+  } else h += '<div class="note">No approaches logged yet.</div>';
+  h += '</div></div>';
+
+  /* ---- putting ---- */
+  h += '<div class="card"><div class="hd"><h3>Putting</h3></div><div class="bd">';
+  if (S.putts){
+    const bk = PUTT_BUCKETS.filter(b=>S.bucket[b.k].n>0);
+    if (bk.length){
+      h += '<div class="chartbox"><h4>Make rate by distance</h4>'
+        + '<div class="cap">Your make rate against an approximate PGA Tour baseline. Bars are only meaningful where the attempt count is reasonable — check the table.</div>'
+        + legend([{c:'var(--s1)',n:'You'},{c:'var(--s2)',n:'Tour baseline'}])
+        + groupedBar(bk.map(b=>b.k.replace(' ft','')), [
+            {name:'You', fill:'var(--s1)', v:bk.map(b=>pct(S.bucket[b.k].made,S.bucket[b.k].n)||0)},
+            {name:'Tour baseline', fill:'var(--s2)', v:bk.map(b=>Math.round(b.base*100))}
+          ], {max:100, suffix:'%', aria:'Make rate by distance'})
+        + tableView(['Distance','Attempts','Made','You','Tour'],
+            bk.map(b=>[b.k, S.bucket[b.k].n, S.bucket[b.k].made, fmtPct(pct(S.bucket[b.k].made,S.bucket[b.k].n)), Math.round(b.base*100)+'%']))
+        + '</div>';
+    }
+    const brRows = BREAKS.filter(b=>S.breakMake[b.k].n).map(b=>({
+      k:b.label, v:pct(S.breakMake[b.k].made,S.breakMake[b.k].n)||0,
+      t:fmtPct(pct(S.breakMake[b.k].made,S.breakMake[b.k].n))+' ('+S.breakMake[b.k].made+'/'+S.breakMake[b.k].n+')'}));
+    if (brRows.length) h += box('Make rate inside 10 feet, by break',
+      'A gap between left-to-right and right-to-left is an aim or read bias, and it is fixable in one practice session.',
+      hbar(brRows,{labelW:100,aria:'Make rate by break'}));
+
+    const missRows = PUTT_MISS.map(k=>({k,v:S.puttMiss[k]||0})).filter(r=>r.v);
+    if (missRows.length) h += box('Why putts missed','Speed misses (short, long) and line misses (high, low, push, pull) need different practice.',hbar(missRows,{labelW:80,aria:'Putt miss reasons'}));
+
+    if (S.lagLeft.filter(x=>x!=null).length)
+      h += '<div class="note"><b>Lag putting.</b> From 20 feet and beyond you average '+r1(S.avgLagLeft)+' feet left, over '
+        + S.lagLeft.filter(x=>x!=null).length+' putts. Tour average is roughly 3 feet from 25 and about 5 feet from 40.</div>';
+
+    if (S.perRound.length>1)
+      h += box('Strokes gained putting, round by round','Above the line is strokes won on the greens; below is strokes lost.',
+        divBar(S.perRound.map(r=>({k:(r.date||'').slice(5)+' '+(r.course||'').slice(0,10), v:r.sgPutt})),{aria:'SG putting per round'}));
+  } else h += '<div class="note">No putts logged yet.</div>';
+  h += '</div></div>';
+
+  /* ---- short game ---- */
+  const sgRows = Object.entries(S.sgLie).filter(([,v])=>v.n).map(([k,v])=>({k, v: v.prox.length?Math.round(avg(v.prox)):0, t:(v.prox.length?r1(avg(v.prox))+' ft':'—')+' ('+v.n+')'}));
+  if (S.shortN){
+    h += '<div class="card"><div class="hd"><h3>Short game</h3></div><div class="bd">'
+      + '<div class="tiles">'
+      + tile('Up &amp; down', fmtPct(S.udPct), S.udMade+' of '+S.udAtt+' attempts')
+      + tile('Avg proximity', S.sgProx.length?r1(avg(S.sgProx))+'<small> ft</small>':'—', S.shortN+' shots logged')
+      + '</div>'
+      + (sgRows.length ? box('Average proximity by lie','Shorter is better. This is the number that decides your up-and-down rate.',hbar(sgRows,{labelW:96,aria:'Short game proximity by lie'})) : '')
+      + '</div></div>';
+  }
+
+  /* ---- mental ---- */
+  const mRows = MENTAL.map(k=>({k,v:S.mental[k]||0})).filter(r=>r.v);
+  if (mRows.length){
+    h += '<div class="card"><div class="hd"><h3>Mental &amp; strategy</h3></div><div class="bd">'
+      + box('Fault tally','Adam Young’s categories — good strike, good line, poor outcome.',hbar(mRows,{labelW:130,aria:'Mental faults'}))
+      + '</div></div>';
+  }
+
+  /* ---- trend ---- */
+  if (S.perRound.length>1){
+    h += '<div class="card"><div class="hd"><h3>Trend</h3></div><div class="bd">'
+      + box('Score to par by round','',lineChart(S.perRound.map(r=>({k:(r.date||'').slice(5), v:r.strokes-r.par, t:plus(r.strokes-r.par)})),{aria:'Score to par trend'}))
+      + '</div></div>';
+  }
+  $('#statsWrap').innerHTML = h;
+}
+/* ================================================================
+   PRACTICE
+   ================================================================ */
+function renderPractice(){
+  const scored = DB.rounds.filter(r=>roundTotal(r));
+  const S = scored.length ? summarise(scored.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5)) : null;
+  const sessions = DB.practice.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
+  let h = '';
+  if (S && S.leaks.length){
+    h += '<div class="card"><div class="hd"><h3>What to work on next</h3></div><div class="bd">'
+      + '<div class="note" style="margin:0 0 10px">From your last '+S.rounds+' round'+(S.rounds===1?'':'s')+'. Spend your time top-down.</div>'
+      + S.leaks.slice(0,3).map((l,i)=>leakRow(l,i)).join('')
+      + '</div></div>';
+  }
+
+  h += card('newprac','Log a practice session','',
+      '<div class="row"><div class="fld grow"><label>Date</label><input type="date" id="pDate" value="'+new Date().toISOString().slice(0,10)+'"></div>'
+    + '<div class="fld" style="width:110px"><label>Minutes</label><input type="number" inputmode="numeric" id="pMin" placeholder="60"></div></div>'
+    + '<div class="row"><span class="lbl">Areas worked (tap all)</span>'+chipRow('pArea',PRACTICE_AREAS,pDraft.areas)+'</div>'
+    + '<div class="row"><span class="lbl">Quality of the session (1 poor → 5 excellent)</span>'+segRow('pQual',[1,2,3,4,5],pDraft.qual)+'</div>'
+    + '<div class="row"><div class="fld grow"><label>Drills, blocks, what you noticed</label>'
+    + '<textarea id="pNotes" placeholder="e.g. 40 balls foot-spray driver — heel strikes gone by ball 25. 20 min ladder drill 5–15 ft.">'+esc(pDraft.notes||'')+'</textarea></div></div>'
+    + '<div class="row" style="margin-top:12px"><button class="btn full" data-act="psave">Save session</button></div>');
+
+  if (sessions.length){
+    const mins = sessions.reduce((a,s)=>a+(s.min||0),0);
+    const areaCount = {};
+    sessions.forEach(s=>(s.areas||[]).forEach(a=>areaCount[a]=(areaCount[a]||0)+1));
+    const rows = Object.entries(areaCount).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({k,v}));
+
+    h += '<div class="tiles">'
+      + tile('Sessions', sessions.length, Math.round(mins/60)+' hours logged')
+      + tile('Avg length', sessions.length?Math.round(mins/sessions.length)+'<small> min</small>':'—','')
+      + '</div>';
+
+    h += '<div class="card"><div class="hd"><h3>Where your practice time goes</h3></div><div class="bd">'
+      + box('Sessions touching each area','Compare this against the leak list above — if they disagree, the practice is the thing to change.',hbar(rows,{labelW:140,aria:'Practice areas'}))
+      + '</div></div>';
+
+    h += '<div class="card"><div class="hd"><h3>History</h3></div><div class="bd">'
+      + sessions.map(s=>'<div class="shotrow"><div class="n">'+(s.qual||'–')+'</div><div class="txt">'
+        + '<b>'+esc(s.date)+(s.min?' · '+s.min+' min':'')+'</b>'
+        + '<em>'+esc((s.areas||[]).join(', ')||'no areas tagged')+(s.notes?' — '+esc(s.notes.slice(0,80))+(s.notes.length>80?'…':''):'')+'</em></div>'
+        + '<button class="del" data-act="pdel" data-v="'+s.id+'">🗑</button></div>').join('')
+      + '</div></div>';
+  }
+  $('#practiceWrap').innerHTML = h;
+}
+let pDraft = { areas:[], qual:3, notes:'' };
+
+/* ================================================================
+   DATA / SETTINGS
+   ================================================================ */
+function renderData(){
+  const bytes = (localStorage.getItem(KEY)||'').length;
+  const shots = DB.rounds.reduce((a,r)=>a + r.holes.reduce((b,h)=>b + h.putts.length + h.short.length + (h.tee.outcome?1:0) + (h.app.state&&h.app.state!=='na'?1:0),0),0);
+  const h = card('exp','Export','',
+      '<div class="note" style="margin:0 0 12px">Everything lives in this browser only. Export regularly — clearing site data wipes it.</div>'
+    + '<div class="row"><button class="btn ghost grow" data-act="csv-shots">Shot CSV</button>'
+    + '<button class="btn ghost grow" data-act="csv-rounds">Round CSV</button></div>'
+    + '<div class="row"><button class="btn ghost grow" data-act="csv-putts">Putting CSV</button>'
+    + '<button class="btn ghost grow" data-act="json">Full backup (JSON)</button></div>')
+  + card('imp','Restore','',
+      '<div class="note" style="margin:0 0 12px">Load a JSON backup. This replaces everything currently stored.</div>'
+    + '<div class="row"><input type="file" id="impFile" accept="application/json,.json" style="padding:9px"></div>')
+  + card('set','Storage','',
+      '<div class="tiles" style="margin:0">'
+    + tile('Rounds', DB.rounds.length, shots+' shots logged')
+    + tile('Practice', DB.practice.length, Math.round(bytes/1024)+' KB used')
+    + '</div>'
+    + '<div class="row" style="margin-top:14px"><button class="btn danger full" data-act="wipe">Delete all data</button></div>')
+  + card('about','About this tracker','',
+      '<div class="note" style="margin:0">Built on Adam Young’s shot tracker: log errors, not everything. Tee shots and approaches are only '
+    + 'recorded in detail when they cost you, which keeps it to a few taps a hole. Putting is the exception — every putt is logged, '
+    + 'because make rates and strokes gained need the full denominator.<br><br>'
+    + 'Strokes gained putting uses an approximate PGA Tour expected-putts curve. It is a yardstick, not gospel — the round-to-round '
+    + 'movement is what to read.<br><br>Data never leaves your device.</div>');
+  $('#dataWrap').innerHTML = h;
+}
+
+function dl(name, text, type){
+  const b = new Blob([text], {type: type||'text/csv;charset=utf-8'});
+  const u = URL.createObjectURL(b), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(u); a.remove(); }, 400);
+  toast('Exported ' + name);
+}
+const q = v => v==null ? '' : /[",\n]/.test(String(v)) ? '"'+String(v).replace(/"/g,'""')+'"' : String(v);
+
+function csvShots(){
+  const head = ['round_date','course','tees','hole','par','score','shot_type','club','outcome','direction','offline',
+    'strike','lie','yards_in','miss_zone','proximity','putt_distance_ft','break','slope','holed','left_ft','miss_reason','mental','note'];
+  const rows = [head.join(',')];
+  DB.rounds.forEach(r=>r.holes.forEach(h=>{
+    if (!holeTouched(h)) return;
+    const base = [r.date, r.course, r.tees, h.n, h.par, h.score];
+    if (h.tee.outcome) rows.push(base.concat(['tee', h.tee.club, h.tee.outcome, h.tee.dir, h.tee.offline,
+      (h.tee.strike||[]).join('|'), '', '', '', '', '', '', '', '', '', '', (h.mental||[]).join('|'), h.note]).map(q).join(','));
+    if (h.app.state) rows.push(base.concat(['approach', h.app.club, h.app.state, '', '',
+      (h.app.strike||[]).join('|'), h.app.lie, h.app.dist, h.app.zone, h.app.prox, '', '', '', '', '', '',
+      (h.mental||[]).join('|'), h.note]).map(q).join(','));
+    h.short.forEach(s=>rows.push(base.concat(['short_game', '', '', '', '',
+      (s.strike||[]).join('|'), s.lie, s.dist, '', s.prox, '', '', '', '', '', '', '', '']).map(q).join(',')));
+    h.putts.forEach((p,i)=>rows.push(base.concat(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', 'Green', '', '', '',
+      p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'), '', '']).map(q).join(',')));
+  }));
+  dl('shots.csv', rows.join('\n'));
+}
+function csvRounds(){
+  const head = ['date','course','tees','conditions','wind','temp','feel','holes','strokes','par','to_par','putts',
+    'three_putts','drives_logged','in_play_pct','clear_shot_pct','gir_pct','scrambling_pct','sg_putting','notes'];
+  const rows = [head.join(',')];
+  DB.rounds.forEach(r=>{
+    const t = roundTotal(r); if(!t) return;
+    const S = summarise([r]);
+    rows.push([r.date,r.course,r.tees,r.conditions,r.wind,r.temp,r.feel,t.n,t.strokes,t.par,t.strokes-t.par,
+      totalPutts(r),S.threePutts,S.teeLogged,S.inPlayPct,S.clearPct,S.girPct,S.scrPct,r2(S.sgPutt),r.notes].map(q).join(','));
+  });
+  dl('rounds.csv', rows.join('\n'));
+}
+function csvPutts(){
+  const head = ['date','course','hole','par','putt_number','distance_ft','break','slope','holed','left_ft','miss_reason','putts_on_hole','sg_putting_hole'];
+  const rows = [head.join(',')];
+  DB.rounds.forEach(r=>r.holes.forEach(h=>{
+    if (!h.putts.length) return;
+    const sg = h.putts[0] && h.putts[0].dist!=null ? r2(expPutts(h.putts[0].dist)-h.putts.length) : '';
+    h.putts.forEach((p,i)=>rows.push([r.date,r.course,h.n,h.par,i+1,p.dist,p.brk,p.slope,p.holed?'yes':'no',
+      p.rem,(p.miss||[]).join('|'),h.putts.length, i===0?sg:''].map(q).join(',')));
+  }));
+  dl('putting.csv', rows.join('\n'));
+}
+
+/* ================================================================
+   EVENTS
+   ================================================================ */
+function setField(o,k,v){ o[k] = (v===''||v==null) ? null : v; }
+function toggleIn(arr,v){ const i=arr.indexOf(v); if(i>-1) arr.splice(i,1); else arr.push(v); }
+
+document.addEventListener('click', e=>{
+  const nav = e.target.closest('.nav button');
+  if (nav){ go(nav.dataset.nav); return; }
+  if (e.target.closest('#themeBtn')){
+    DB.settings.theme = DB.settings.theme==='dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = DB.settings.theme; save(); return;
+  }
+  if (e.target.closest('#sheetClose') || e.target.id==='sheetBg'){ closeSheet(); render(); return; }
+
+  const s = e.target.closest('[data-sact]');
+  if (s){ sheetAction(s.dataset.sact, s.dataset.v, s); return; }
+
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  action(b.dataset.act, b.dataset.v, b, e);
+});
+
+/* Only <select> uses 'change'. Text and number fields are handled on 'input' and never
+   trigger a re-render — a re-render on blur would detach the element the user is tapping
+   next, and a click on a detached node never reaches this listener, so the first tap after
+   typing would silently do nothing. */
+document.addEventListener('change', e=>{
+  const t = e.target;
+  if (t.id==='impFile'){ importFile(t.files[0]); return; }
+  if (t.tagName !== 'SELECT') return;
+  const s = t.closest('[data-sact]'); if (s){ sheetAction(s.dataset.sact, t.value, s, true); return; }
+  const b = t.closest('[data-act]'); if (b) action(b.dataset.act, t.value, b, e);
+});
+document.addEventListener('input', e=>{
+  const t = e.target;
+  if (t.dataset.act==='hole-note'){ const h=H(); if(h){ h.note=t.value; save(); } return; }
+  if (t.id==='pNotes'){ pDraft.notes = t.value; return; }
+  if (['app-dist','app-prox'].indexOf(t.dataset.act)>-1){
+    const h=H(); if(!h) return;
+    setField(h.app, t.dataset.act==='app-dist'?'dist':'prox', t.value===''?null:+t.value); save(); return;
+  }
+  const s = t.closest('[data-sact]'); if (s) sheetAction(s.dataset.sact, t.value, s, true);
+});
+
+function action(a, v, node, ev){
+  const r = R(), h = H();
+  switch(a){
+    case 'toggle': {
+      DB.settings.collapsed[v] = !DB.settings.collapsed[v]; save();
+      const c = document.getElementById('card-'+v); if (c) c.classList.toggle('collapsed'); return;
+    }
+    case 'nr-feel': $$('[data-act="nr-feel"]').forEach(x=>x.classList.toggle('on', x.dataset.v===v)); return;
+    case 'start': {
+      const course = $('#nrCourse').value.trim();
+      if (!course){ toast('Course name, please'); $('#nrCourse').focus(); return; }
+      const feelBtn = document.querySelector('[data-act="nr-feel"].on');
+      const nr = newRound({
+        date: $('#nrDate').value, course, tees: $('#nrTees').value.trim(),
+        wind: $('#nrWind').value, conditions: $('#nrCond').value,
+        temp: $('#nrTemp').value ? +$('#nrTemp').value : null,
+        feel: feelBtn ? +feelBtn.dataset.v : null
+      });
+      DB.rounds.push(nr); cur = {roundId:nr.id, hole:0}; saveNow(); render(); return;
+    }
+    case 'open':  cur = {roundId:v, hole:0}; render(); return;
+    case 'exit':  cur = {roundId:null, hole:0}; render(); return;
+    case 'del-round': {
+      if (ev) ev.stopPropagation();
+      if (!confirm('Delete this round permanently?')) return;
+      DB.rounds = DB.rounds.filter(x=>x.id!==v); if (cur.roundId===v) cur.roundId=null; saveNow(); render(); return;
+    }
+    case 'prev': cur.hole = (cur.hole+17)%18; render(); return;
+    case 'next': cur.hole = (cur.hole+1)%18;  render(); return;
+    case 'jump': cur.hole = +v; render(); return;
+    case 'par':  h.par = +v; save(); render(); return;
+    case 'sc':     h.score = clamp((h.score==null ? h.par : h.score) + (+v), 1, 15); save(); render(); return;
+    case 'sc-par': h.score = h.score===h.par ? null : h.par; save(); render(); return;
+    case 'quickpar': {
+      h.score = h.par;
+      if (h.par!==3) h.tee.outcome = 'good';
+      h.app.state = 'gir';
+      if (!h.putts.length) h.putts = [
+        {dist:22, brk:null, slope:null, holed:false, rem:2, miss:[]},
+        {dist:2, brk:null, slope:null, holed:true, rem:null, miss:[]}
+      ];
+      save(); render(); toast('Par logged — edit the putt distances'); return;
+    }
+    case 'tee-out':    h.tee.outcome = h.tee.outcome===v ? null : v; save(); render(); return;
+    case 'tee-dir':    h.tee.dir = h.tee.dir===v ? null : v; save(); render(); return;
+    case 'tee-off':    h.tee.offline = h.tee.offline===v ? null : v; save(); render(); return;
+    case 'tee-strike': toggleIn(h.tee.strike, v); save(); render(); return;
+    case 'tee-club':   h.tee.club = v; save(); return;
+    case 'app-state':  h.app.state = h.app.state===v ? null : v; if (h.app.state==='gir') h.app.zone=null; if (h.par===3) h.app.lie='Tee'; save(); render(); return;
+    case 'app-lie':    h.app.lie = h.app.lie===v ? null : v; save(); render(); return;
+    case 'app-zone':   h.app.zone = h.app.zone===v ? null : v; save(); render(); return;
+    case 'app-strike': toggleIn(h.app.strike, v); save(); render(); return;
+    case 'app-club':   h.app.club = v; save(); return;
+    case 'mental':     toggleIn(h.mental, v); save(); render(); return;
+    case 'add-putt':   puttSheet(null); return;
+    case 'edit-putt':  puttSheet(+v); return;
+    case 'del-putt':   h.putts.splice(+v,1); save(); render(); return;
+    case 'add-short':  shortSheet(null); return;
+    case 'edit-short': shortSheet(+v); return;
+    case 'del-short':  h.short.splice(+v,1); save(); render(); return;
+    case 'finish':     finishRound(); return;
+    case 'filter':     statFilter = v; renderStats(); return;
+    case 'pArea':      toggleIn(pDraft.areas, v); renderPractice(); return;
+    case 'pQual':      pDraft.qual = +v; renderPractice(); return;
+    case 'psave': {
+      const d = $('#pDate').value, m = $('#pMin').value;
+      if (!pDraft.areas.length){ toast('Tag at least one area'); return; }
+      DB.practice.push({id:uid(), date:d, min: m?+m:null, areas: pDraft.areas.slice(), qual: pDraft.qual, notes: $('#pNotes').value.trim()});
+      pDraft = {areas:[], qual:3, notes:''}; saveNow(); renderPractice(); toast('Session saved'); return;
+    }
+    case 'pdel': DB.practice = DB.practice.filter(x=>x.id!==v); saveNow(); renderPractice(); return;
+    case 'csv-shots':  csvShots(); return;
+    case 'csv-rounds': csvRounds(); return;
+    case 'csv-putts':  csvPutts(); return;
+    case 'json':       dl('shot-tracker-backup-'+new Date().toISOString().slice(0,10)+'.json', JSON.stringify(DB,null,2), 'application/json'); return;
+    case 'wipe':
+      if (!confirm('Delete every round and practice session? Export first if you want a copy.')) return;
+      if (!confirm('Last chance — this cannot be undone.')) return;
+      DB = {rounds:[], practice:[], settings:DB.settings}; cur={roundId:null,hole:0}; saveNow(); render(); toast('All data deleted'); return;
+  }
+}
+
+function sheetAction(a, v, node, silent){
+  const h = H();
+  switch(a){
+    case 'dist':   tmp.dist = +v; drawPuttSheet(); return;
+    case 'distin': tmp.dist = v===''?null:+v; syncSaveBtn(tmp.dist!=null && tmp.holed!=null); return;
+    case 'sBrk':   tmp.brk = tmp.brk===v?null:v; drawPuttSheet(); return;
+    case 'sSlope': tmp.slope = tmp.slope===v?null:v; drawPuttSheet(); return;
+    case 'sHoled': tmp.holed = v==='yes'; if (tmp.holed){ tmp.rem=null; tmp.miss=[]; } drawPuttSheet(); return;
+    case 'rem':    tmp.rem = v===''?null:+v; return;
+    case 'sMiss':  toggleIn(tmp.miss, v); drawPuttSheet(); return;
+    case 'save': {
+      if (tmp.dist==null || tmp.holed==null) return;
+      const p = {dist:tmp.dist, brk:tmp.brk, slope:tmp.slope, holed:tmp.holed, rem:tmp.rem, miss:tmp.miss.slice()};
+      if (tmp._i==null) h.putts.push(p); else h.putts[tmp._i]=p;
+      /* keep score honest: if score already set below putt count, bump it */
+      saveNow(); closeSheet(); render(); return;
+    }
+    case 'sgdist':  tmp.dist = v===''?null:+v; syncSaveBtn(tmp.dist!=null); return;
+    case 'sgLie':   tmp.lie = tmp.lie===v?null:v; drawShortSheet(); return;
+    case 'sgStrike':toggleIn(tmp.strike, v); drawShortSheet(); return;
+    case 'sgprox':  tmp.prox = v===''?null:+v; return;
+    case 'sgsave': {
+      if (tmp.dist==null) return;
+      const s = {dist:tmp.dist, lie:tmp.lie, strike:tmp.strike.slice(), prox:tmp.prox};
+      if (tmp._i==null) h.short.push(s); else h.short[tmp._i]=s;
+      saveNow(); closeSheet(); render(); return;
+    }
+    case 'rnote':  { const r=R(); if(r){ r.notes = v; save(); } return; }
+    case 'close':  closeSheet(); render(); return;
+    case 'closeout': closeSheet(); cur={roundId:null,hole:0}; saveNow(); render(); return;
+  }
+}
+function syncSaveBtn(ok){
+  const b = document.querySelector('#sheetBody [data-sact="save"], #sheetBody [data-sact="sgsave"]');
+  if (b) b.disabled = !ok;
+}
+
+function importFile(f){
+  if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const p = JSON.parse(rd.result);
+      if (!p || !Array.isArray(p.rounds)) throw new Error('bad file');
+      if (!confirm('Replace all current data with this backup? '+p.rounds.length+' rounds found.')) return;
+      DB.rounds = p.rounds; DB.practice = Array.isArray(p.practice)?p.practice:[];
+      DB.settings = Object.assign(DB.settings, p.settings||{});
+      cur = {roundId:null, hole:0}; saveNow(); render(); toast('Restored '+p.rounds.length+' rounds');
+    } catch(err){ toast('That file could not be read'); }
+  };
+  rd.readAsText(f);
+}
+
+/* ---------- keyboard (desktop convenience) ---------- */
+document.addEventListener('keydown', e=>{
+  if (e.target.matches('input,textarea,select')) return;
+  if (VIEW!=='round' || !R()) return;
+  if (e.key==='ArrowLeft')  action('prev');
+  if (e.key==='ArrowRight') action('next');
+});
+
+/* ---------- boot ---------- */
+load();
+document.documentElement.dataset.theme = DB.settings.theme==='dark' ? 'dark' : 'light';
+const unfinished = DB.rounds.filter(r=>!r.finished).sort((a,b)=>b.created-a.created)[0];
+if (unfinished) cur.roundId = unfinished.id;
+render();
+
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+
+</script>
+</body>
+</html>
