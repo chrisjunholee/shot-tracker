@@ -1,5 +1,5 @@
 /* Shot Tracker service worker — cache-first shell so the app opens with no signal. */
-const CACHE = 'shot-tracker-v4';
+const CACHE = 'shot-tracker-v5';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

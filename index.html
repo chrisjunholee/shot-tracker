@@ -589,6 +589,8 @@ function card(id, title, badge, body){
 function renderRound(){
   const r = R();
   $('#roundWrap').innerHTML = r ? holeScreen(r) : startScreen();
+  /* the readout is patched in place on input, so it needs seeding after a fresh render */
+  if (!r) updateCH();
 }
 
 /* most recent index entered, so it carries between rounds */
