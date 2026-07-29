@@ -1,7 +1,7 @@
 {
   "name": "Shot Tracker",
   "short_name": "Shots",
-  "description": "On-course shot tracking built on the Adam Young method — errors off the tee and on approach, every putt in full.",
+  "description": "Trust the Process — on-course shot tracking: errors off the tee and on approach, every putt in full.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

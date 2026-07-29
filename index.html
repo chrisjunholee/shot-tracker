@@ -289,7 +289,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 <div class="topbar">
   <div class="grow">
     <h1 id="barTitle">Shot Tracker</h1>
-    <div class="sub" id="barSub">Adam Young method</div>
+    <div class="sub" id="barSub">Trust the Process</div>
   </div>
   <button class="icon-btn" id="themeBtn" title="Toggle theme">◐</button>
 </div>
@@ -522,7 +522,7 @@ function render(){
   $('#barTitle').textContent = r ? (r.course || 'Round') : 'Shot Tracker';
   $('#barSub').textContent = r
     ? (r.date + (r.tees ? ' · ' + r.tees : '') + (roundTotal(r) ? ' · ' + roundTotal(r).strokes + ' thru ' + roundTotal(r).n : ''))
-    : 'Adam Young method';
+    : 'Trust the Process';
 }
 
 /* ---------- sheet ---------- */
