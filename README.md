@@ -33,9 +33,12 @@ why that matters.
 ### Updating it later
 
 Edit `index.html` in GitHub (pencil icon) and commit, or upload a replacement. Bump the
-`CACHE` constant at the top of `sw.js` (`shot-tracker-v1` → `v2`) so installed copies pull
-the new version instead of serving the cached one. GitHub's CDN takes a couple of minutes;
-add `?v=2` to the URL to confirm you're seeing the new build.
+`CACHE` constant at the top of `sw.js` so installed copies pull the new version instead of
+serving the cached one. GitHub's CDN takes a couple of minutes; add `?v=N` to the URL to
+confirm you're seeing the new build.
+
+The app versions its own storage and migrates on load, so an older phone picks up schema
+changes automatically without losing rounds.
 
 ---
 
@@ -49,31 +52,42 @@ nothing. That principle is kept here, with one deliberate exception.
 
 | Area | What you log |
 |---|---|
-| **Tee shot** | One tap always. Detail only when it wasn't good. |
+| **Tee shot** | Result, direction, distance and strike on every drive. Amounts only when it missed. |
 | **Approach** | One tap always (green / missed / no shot). Detail only on a miss. |
 | **Short game** | Only shots inside 50 yards, only when you took one. |
 | **Putting** | **Every putt, in full.** |
-| **Mental** | Only when a fault applied. |
+| **Mental** | Only when a fault applied, tagged to the phase it happened in. |
 
 Putting is the exception because make rates and strokes gained are ratios — they need the
-denominator. If you only log the putts you miss, the numbers are meaningless.
+denominator. If you only log the putts you miss, the numbers are meaningless. The tee shot
+is the other exception: direction and strike are logged on good drives too, because
+"fairways hit" tells you nothing about *which* way you miss or *why*.
 
-A clean par is about five taps: score, tee result, green, two putts. Or one tap on
-**Quick par**, then correct the putt distances.
+**Quick par** fills in a fairway drive, middle strike, green in regulation and a par
+score, then opens the putt sheet. It never invents putts — those are always real.
 
 ### Tee shot
 
-Four outcomes, worst to best:
+Four independent things get recorded, because they answer different questions.
+
+**Result** — was the shot any use?
 
 - **Good** — in play *and* a clear shot at the green
 - **Blocked** — in play but no shot (behind a tree, wrong side, blocked out)
 - **Trouble** — recovery or punch-out only
 - **Penalty** — OB, lost, hazard
 
-The good/blocked split is the important one. Fairways-hit hides it: a ball three yards
-into the first cut with a clean look is a fine drive, and a ball in the fairway behind a
-bunker lip is not. Only when the drive wasn't good do you add direction, how far offline
-(under 10 / 10–25 / 25–50 / 50+ yards), and strike — toe, heel, high, low.
+**Direction** — left, fairway, or right, on every drive. If it missed, how far offline
+(under 10 / 10–25 / 25–50 / 50+ yards).
+
+**Distance** — short, as expected, or long, and by how much.
+
+**Strike** — middle, toe, heel, high, low.
+
+Result and direction are deliberately separate. A ball twenty yards left with a clean look
+at the green is a good outcome *and* a left miss — that's a strategy working, not a swing
+fault, and conflating the two hides both. Fairways-hit alone can't tell you which way you
+miss; result alone can't tell you whether you're getting away with it.
 
 Par 3s have no tee-shot card. The tee shot *is* the approach and is logged there, so it
 counts toward greens in regulation and not toward driving stats.
@@ -105,9 +119,36 @@ Everything else derives from that: putt count, first-putt proximity, second-putt
 proximity, make rate by distance, make rate by break direction, three-putt rate, lag
 quality from 20+ feet, and strokes gained.
 
+Miss a putt and enter what you left yourself, and the next putt opens automatically with
+that distance already filled in — the distance remaining *is* the next putt, so you never
+type it twice. Close the sheet instead if the next one was conceded.
+
 Make rate split by break direction is worth the extra tap on its own. A gap between
 left-to-righters and right-to-lefters is an aim or read bias, it's invisible in normal
 stats, and it's a one-session fix once you can see it.
+
+### Handicap
+
+The start-round form takes the **course rating**, **slope**, and **your current index**,
+and works out your course handicap live as you type — using the World Handicap System
+formula:
+
+    Course Handicap = Index × (Slope ÷ 113) + (Course Rating − Par)
+
+Slope alone can't do it: slope scales your index to the course's difficulty *relative to
+a scratch player*, and the rating−par term accounts for courses that are hard in absolute
+terms. Torrey South off the Black at 74.6/138 turns a 12.4 index into an 18 — playing to
+your handicap there means 90, not 84.
+
+Your index carries over from your last round. Rating and slope are remembered per course
+and tee box and prefill automatically, but never overwrite anything you've typed.
+
+Once a full 18 is logged, the round summary also shows:
+
+- **Net** — gross minus course handicap, and the target score for the day.
+- **Score differential** — `(113 ÷ Slope) × (Gross − Course Rating)`, the number that
+  actually feeds your index. Below your index, the round helps; above it, it doesn't.
+  This omits the playing-conditions calculation, which only the handicap system can apply.
 
 ### Mental and strategy
 
@@ -115,6 +156,13 @@ Young's eight faults — too aggressive strategy, mis-calculation, fear, club se
 distracted, loss of cue-focus, mis-judged conditions, no commitment to decision — plus a
 free-text note per hole. These are for good strikes on the intended line that still
 produced a bad result.
+
+Tags are split across three phases: **off the tee**, **approach**, and **putting**. Tap the
+phase, then the faults. The stats then show not just which faults recur but where in the
+hole they happen, which is usually the more actionable half.
+
+Rounds logged before the split keep their tags under "untagged phase" — they still count
+toward the totals, they just can't be attributed after the fact.
 
 ---
 

@@ -343,7 +343,9 @@ const TEE_OUT = [
   {k:'trouble', label:'Trouble', sub:'Recovery only',       cls:'bad'},
   {k:'penalty', label:'Penalty', sub:'OB / lost / hazard',  cls:'bad'}
 ];
-const TEE_STRIKE = ['Toe','Heel','High','Low'];
+const TEE_STRIKE = ['Middle','Toe','Heel','High','Low'];
+const TEE_DIR  = [{k:'L',label:'Left'},{k:'F',label:'Fairway'},{k:'R',label:'Right'}];
+const TEE_DIST = [{k:'short',label:'Short'},{k:'ok',label:'As expected'},{k:'long',label:'Long'}];
 const OFFLINE = ['Under 10y','10–25y','25–50y','50y+'];
 const LIES = ['Tee','Fairway','Light rough','Heavy rough','Sand','Recovery'];
 const SG_LIES = ['Fairway','Light rough','Heavy rough','Sand','Hardpan','Fringe'];
@@ -359,6 +361,8 @@ const ZONES = [
 
 const MENTAL = ['Too aggressive strategy','Mis-calculation','Fear','Club selection',
   'Distracted','Loss of cue-focus','Mis-judged conditions','No commitment to decision'];
+const MENTAL_PHASES = [{k:'tee',label:'Off the tee'},{k:'app',label:'Approach'},{k:'putt',label:'Putting'}];
+const MENTAL_KEYS = ['tee','app','putt','general'];
 
 const BREAKS = [{k:'L2R',label:'Left → right'},{k:'R2L',label:'Right → left'},{k:'straight',label:'Straight'}];
 const SLOPES = [{k:'up',label:'Uphill'},{k:'down',label:'Downhill'},{k:'flat',label:'Flat'}];
@@ -428,6 +432,7 @@ function load(){
       DB.rounds   = Array.isArray(p.rounds) ? p.rounds : [];
       DB.practice = Array.isArray(p.practice) ? p.practice : [];
       DB.settings = Object.assign(DB.settings, p.settings || {});
+      DB.schema   = p.schema;
     }
   } catch(e){ console.warn('load failed', e); }
 }
@@ -445,11 +450,43 @@ function saveNow(){ clearTimeout(saveT); try{ localStorage.setItem(KEY, JSON.str
 function newHole(i, par){
   return {
     n:i+1, par: par || DEFAULT_PARS[i] || 4, score:null,
-    tee:  {club:'Driver', outcome:null, dir:null, offline:null, strike:[]},
+    tee:  {club:'Driver', outcome:null, dir:null, offline:null, dist:null, distOff:null, strike:[]},
     app:  {state:null, dist:null, club:'', lie:null, zone:null, prox:null, strike:[]},
-    short:[], putts:[], mental:[], note:''
+    short:[], putts:[], mental:{tee:[], app:[], putt:[], general:[]}, note:''
   };
 }
+
+/* ---------- schema migration ----------
+   Runs once at load. Never drops anything: tags logged before the phase split are
+   parked under `general` and still counted, because we cannot know which phase they
+   belonged to. */
+const SCHEMA = 2;
+function migrate(){
+  if (DB.schema === SCHEMA) return;
+  let touched = 0;
+  DB.rounds.forEach(r => (r.holes||[]).forEach(h => {
+    if (h.tee){
+      if (h.tee.dir === 'straight') h.tee.dir = 'F';       /* old "straight" meant not offline */
+      if (h.tee.dist === undefined)    h.tee.dist = null;
+      if (h.tee.distOff === undefined) h.tee.distOff = null;
+      if (!Array.isArray(h.tee.strike)) h.tee.strike = [];
+    }
+    if (Array.isArray(h.mental)){
+      h.mental = {tee:[], app:[], putt:[], general: h.mental.slice()};
+      touched++;
+    } else if (!h.mental || typeof h.mental !== 'object'){
+      h.mental = {tee:[], app:[], putt:[], general:[]};
+    } else {
+      MENTAL_KEYS.forEach(k => { if (!Array.isArray(h.mental[k])) h.mental[k] = []; });
+    }
+  }));
+  DB.schema = SCHEMA;
+  saveNow();
+  if (touched) console.info('migrated ' + touched + ' holes of mental tags to phase buckets');
+}
+
+const mentalAll   = h => MENTAL_KEYS.reduce((a,k) => a.concat((h.mental && h.mental[k]) || []), []);
+const mentalCount = h => mentalAll(h).length;
 function newRound(m){
   const prior = DB.rounds.filter(r => (r.course||'').toLowerCase() === (m.course||'').toLowerCase() && r.holes);
   const pars  = prior.length ? prior[0].holes.map(h=>h.par) : DEFAULT_PARS;
@@ -463,6 +500,7 @@ function newRound(m){
 }
 
 let cur = { roundId:null, hole:0 };
+let mentalTab = 'tee';
 const R = () => DB.rounds.find(r => r.id === cur.roundId) || null;
 const H = () => { const r = R(); return r ? r.holes[cur.hole] : null; };
 
@@ -477,7 +515,8 @@ function scoreLabel(rel){
 }
 
 function holeTouched(h){
-  return h.score!=null || h.tee.outcome || h.app.state || h.putts.length || h.short.length || h.mental.length;
+  return h.score!=null || h.tee.outcome || h.tee.dir || h.app.state
+      || h.putts.length || h.short.length || mentalCount(h) > 0;
 }
 function roundTotal(r){
   const s = r.holes.filter(h=>h.score!=null);
@@ -666,11 +705,6 @@ function startScreen(){
     + '<div class="fld grow"><label>Your index</label>'
     + '<input type="number" step="0.1" id="nrIndex" inputmode="decimal" placeholder="12.4" value="'+(lastIndex()??'')+'"></div></div>'
     + '<div class="chbox" id="chOut"></div>'
-    + '<div class="row"><div class="fld grow"><label>Wind</label>'
-    + '<select id="nrWind"><option value="">—</option><option>Calm</option><option>Light</option><option>Moderate</option><option>Strong</option></select></div>'
-    + '<div class="fld grow"><label>Conditions</label>'
-    + '<select id="nrCond"><option value="">—</option><option>Firm &amp; fast</option><option>Normal</option><option>Soft</option><option>Wet</option><option>Windy</option></select></div>'
-    + '<div class="fld" style="width:92px"><label>Temp °F</label><input type="number" id="nrTemp" inputmode="numeric" placeholder="72"></div></div>'
     + '<div class="row"><span class="lbl">How you felt going in (1 rough → 5 sharp)</span>'
     + segRow('nr-feel',[1,2,3,4,5],3)+'</div>'
     + '<div class="row" style="margin-top:14px"><button class="btn full" data-act="start">Start round</button></div>'
@@ -732,17 +766,23 @@ function holeScreen(r){
 
   /* tee shot (par 4/5 only) */
   if (!isP3){
-    const badge = h.tee.outcome ? (h.tee.outcome==='good'?'✓ good':'flagged') : '';
-    let b = '<div class="row"><span class="lbl">Result</span>'+segRow('tee-out',TEE_OUT,h.tee.outcome)+'</div>';
-    if (h.tee.outcome && h.tee.outcome!=='good'){
-      b += '<hr class="sep">'
-        + '<div class="row"><span class="lbl">Which way did it go?</span>'
-        + segRow('tee-dir',[{k:'L',label:'Left'},{k:'straight',label:'Straight'},{k:'R',label:'Right'}],h.tee.dir)+'</div>'
-        + '<div class="row"><span class="lbl">How far offline</span>'+segRow('tee-off',OFFLINE,h.tee.offline)+'</div>'
-        + '<div class="row"><span class="lbl">Strike (tap all that applied)</span>'+segRow('tee-strike',TEE_STRIKE,h.tee.strike)+'</div>';
-    }
-    b += '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Club off the tee</label>'
-      + selectEl('tee-club',CLUBS,h.tee.club)+'</div></div>';
+    const T = h.tee;
+    const dirLabel = (TEE_DIR.find(d=>d.k===T.dir)||{}).label;
+    const badge = [dirLabel, T.outcome].filter(Boolean).join(' · ');
+    let b = '<div class="row"><span class="lbl">Result</span>'+segRow('tee-out',TEE_OUT,T.outcome)+'</div>'
+      + '<hr class="sep">'
+      + '<div class="row"><span class="lbl">Where it finished</span>'+segRow('tee-dir',TEE_DIR,T.dir)+'</div>'
+      + ((T.dir==='L'||T.dir==='R')
+          ? '<div class="row"><span class="lbl">How far '+(T.dir==='L'?'left':'right')+'</span>'
+            + segRow('tee-off',OFFLINE,T.offline)+'</div>' : '')
+      + '<div class="row"><span class="lbl">Distance</span>'+segRow('tee-dist',TEE_DIST,T.dist)+'</div>'
+      + ((T.dist==='short'||T.dist==='long')
+          ? '<div class="row"><span class="lbl">How far '+(T.dist==='short'?'short':'past it')+'</span>'
+            + segRow('tee-distoff',OFFLINE,T.distOff)+'</div>' : '')
+      + '<hr class="sep">'
+      + '<div class="row"><span class="lbl">Strike (tap all that applied)</span>'+segRow('tee-strike',TEE_STRIKE,T.strike)+'</div>'
+      + '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Club off the tee</label>'
+      + selectEl('tee-club',CLUBS,T.club)+'</div></div>';
     out += card('tee','Tee shot',badge,b);
   }
 
@@ -809,11 +849,20 @@ function holeScreen(r){
   pb += '<button class="btn ghost full" data-act="add-putt" style="margin-top:'+(h.putts.length?'8px':'0')+'">+ Add putt</button>';
   out += card('putt','Putting', h.putts.length?h.putts.length+'':'', pb);
 
-  /* mental */
-  let mb = chipRow('mental',MENTAL,h.mental)
+  /* mental — tagged per phase */
+  const M = h.mental;
+  let mb = '<div class="row">'
+    + segRow('mental-tab', MENTAL_PHASES.map(p=>({
+        k:p.k, label:p.label, sub:(M[p.k].length ? M[p.k].length+' tagged' : '')
+      })), mentalTab)
+    + '</div>'
+    + chipRow('mental', MENTAL, M[mentalTab])
+    + (M.general && M.general.length
+        ? '<div class="note">Tagged before the phases were split, kept for the stats: '
+          + esc(M.general.join(', ')) + '</div>' : '')
     + '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Strategy / note for this hole</label>'
     + '<textarea data-act="hole-note" placeholder="What was the decision, and would you make it again?">'+esc(h.note)+'</textarea></div></div>';
-  out += card('mental','Mental &amp; strategy', h.mental.length?h.mental.length+'':'', mb);
+  out += card('mental','Mental &amp; strategy', mentalCount(h)?mentalCount(h)+'':'', mb);
 
   /* footer */
   out += '<div class="footnav">'
@@ -827,17 +876,20 @@ function holeScreen(r){
 
 /* ---------- putt sheet ---------- */
 let tmp = null;
-function puttSheet(idx){
+function puttSheet(idx, preset){
   const h = H();
   tmp = idx==null
-    ? {dist:null, brk:null, slope:null, holed:null, rem:null, miss:[]}
+    ? {dist: (preset==null ? null : preset), brk:null, slope:null, holed:null, rem:null, miss:[]}
     : JSON.parse(JSON.stringify(h.putts[idx]));
   tmp._i = idx;
+  tmp._n = (idx==null ? h.putts.length : idx) + 1;
+  tmp._chained = idx==null && preset!=null;
   drawPuttSheet();
 }
 function drawPuttSheet(){
   const p = tmp;
-  let b = '<div class="row"><span class="lbl">Putt length (feet)</span>'
+  let b = (p._chained ? '<div class="note" style="margin:0 0 10px">Carried over from the putt you just left short — change it if the read was different.</div>' : '')
+    + '<div class="row"><span class="lbl">Putt length (feet)</span>'
     + '<div class="row" style="gap:6px">' + PUTT_QUICK.map(d=>
         '<button class="chip sm'+(p.dist===d?' on':'')+'" data-sact="dist" data-v="'+d+'">'+d+'</button>').join('')
     + '</div></div>'
@@ -856,7 +908,7 @@ function drawPuttSheet(){
   }
   b += '<div class="row" style="margin-top:16px">'
     + '<button class="btn full" data-sact="save"'+(p.dist==null||p.holed==null?' disabled':'')+'>Save putt</button></div>';
-  openSheet(tmp._i==null?'Add putt':'Edit putt', b);
+  openSheet((tmp._i==null ? 'Putt ' : 'Edit putt ') + tmp._n, b);
 }
 
 /* ---------- short game sheet ---------- */
@@ -921,14 +973,15 @@ function summarise(rounds){
   const S = {
     rounds: rounds.length, holes:0, scored:0, strokes:0, parTotal:0,
     teeLogged:0, teeGood:0, teeBlocked:0, teeTrouble:0, teePenalty:0,
-    teeDir:{L:0,R:0,straight:0}, teeOff:{}, teeStrike:{},
+    teeDir:{L:0,F:0,R:0}, teeOff:{}, teeStrike:{}, teeDist:{short:0,ok:0,long:0}, teeDistOff:{},
+    teeDirN:0, teeDistN:0, teeStrikeN:0,
     appN:0, girN:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
     shortN:0, sgLie:{}, sgStrike:{}, sgProx:[], udAtt:0, udMade:0, scrAtt:0, scrMade:0,
     putts:0, threePutts:0, onePutts:0, sgPutt:0, sgPuttHoles:0,
     bucket:{}, breakMake:{}, puttMiss:{}, lagFrom:[], lagLeft:[],
-    mental:{}, perRound:[], leaks:[]
+    mental:{}, mentalPhase:{tee:0, app:0, putt:0, general:0}, perRound:[], leaks:[]
   };
-  OFFLINE.forEach(k=>S.teeOff[k]=0);
+  OFFLINE.forEach(k=>{ S.teeOff[k]=0; S.teeDistOff[k]=0; });
   TEE_STRIKE.forEach(k=>S.teeStrike[k]=0);
   APP_STRIKE.forEach(k=>S.appStrike[k]=0);
   ZONES.forEach(z=>S.zones[z.k]=0);
@@ -947,14 +1000,19 @@ function summarise(rounds){
       if (h.score!=null){ S.scored++; S.strokes+=h.score; S.parTotal+=h.par; rs.strokes+=h.score; rs.par+=h.par; rs.n++; }
 
       /* tee */
-      if (h.par!==3 && h.tee.outcome){
-        S.teeLogged++; rs.teeN++;
-        if (h.tee.outcome==='good'){ S.teeGood++; rs.inPlay++; }
-        if (h.tee.outcome==='blocked'){ S.teeBlocked++; rs.inPlay++; }
-        if (h.tee.outcome==='trouble') S.teeTrouble++;
-        if (h.tee.outcome==='penalty') S.teePenalty++;
-        if (h.tee.dir) S.teeDir[h.tee.dir]=(S.teeDir[h.tee.dir]||0)+1;
+      if (h.par!==3 && (h.tee.outcome || h.tee.dir)){
+        if (h.tee.outcome){
+          S.teeLogged++; rs.teeN++;
+          if (h.tee.outcome==='good'){ S.teeGood++; rs.inPlay++; }
+          if (h.tee.outcome==='blocked'){ S.teeBlocked++; rs.inPlay++; }
+          if (h.tee.outcome==='trouble') S.teeTrouble++;
+          if (h.tee.outcome==='penalty') S.teePenalty++;
+        }
+        if (h.tee.dir){ S.teeDirN++; S.teeDir[h.tee.dir]=(S.teeDir[h.tee.dir]||0)+1; }
         if (h.tee.offline) S.teeOff[h.tee.offline]=(S.teeOff[h.tee.offline]||0)+1;
+        if (h.tee.dist){ S.teeDistN++; S.teeDist[h.tee.dist]=(S.teeDist[h.tee.dist]||0)+1; }
+        if (h.tee.distOff) S.teeDistOff[h.tee.distOff]=(S.teeDistOff[h.tee.distOff]||0)+1;
+        if ((h.tee.strike||[]).length) S.teeStrikeN++;
         (h.tee.strike||[]).forEach(k=>S.teeStrike[k]=(S.teeStrike[k]||0)+1);
       }
 
@@ -1007,7 +1065,11 @@ function summarise(rounds){
         });
       }
 
-      (h.mental||[]).forEach(k=>S.mental[k]=(S.mental[k]||0)+1);
+      MENTAL_KEYS.forEach(ph => {
+        const tags = (h.mental && h.mental[ph]) || [];
+        S.mentalPhase[ph] = (S.mentalPhase[ph]||0) + tags.length;
+        tags.forEach(k=>S.mental[k]=(S.mental[k]||0)+1);
+      });
     });
     if (rs.n) S.perRound.push(rs);
   });
@@ -1015,6 +1077,10 @@ function summarise(rounds){
   S.perRound.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
   S.inPlayPct = pct(S.teeGood + S.teeBlocked, S.teeLogged);
   S.clearPct  = pct(S.teeGood, S.teeLogged);
+  S.fairwayPct = pct(S.teeDir.F, S.teeDirN);
+  S.shortPct   = pct(S.teeDist.short, S.teeDistN);
+  S.longPct    = pct(S.teeDist.long,  S.teeDistN);
+  S.middlePct  = pct(S.teeStrike['Middle']||0, S.teeStrikeN);
   S.girPct    = pct(S.girN, S.appN);
   S.scrPct    = pct(S.scrMade, S.scrAtt);
   S.udPct     = pct(S.udMade, S.udAtt);
@@ -1074,9 +1140,19 @@ function buildLeaks(S){
       'Converted '+S.udMade+' of '+S.udAtt+' ('+fmtPct(S.udPct)+') when you missed the green.',
       'Proximity is the whole game here — log where the chips finish and practise to a landing spot, not a technique.');
 
-  Object.entries(S.mental).filter(([,v])=>v>=3).forEach(([k,v])=>
-    push(v*COST.mental/n, k, v+' occurrence'+(v===1?'':'s')+' across '+S.rounds+' round'+(S.rounds===1?'':'s')+'.',
-      'Mental faults are the cheapest strokes on this list to buy back — they need a decision routine, not a range session.'));
+  if (S.teeDistN >= 8 && S.teeDist.short >= S.teeDist.long*2 && S.teeDist.short >= 4)
+    push(S.teeDist.short*0.2/n, 'Coming up short off the tee',
+      S.teeDist.short+' of '+S.teeDistN+' drives finished short of where you expected against '+S.teeDist.long+' long.',
+      'Either the strike is costing you distance or the expectation is wrong. Check the strike chart first — if it is clean, your yardage is optimistic.');
+
+  const phaseName = {tee:'off the tee', app:'on approach', putt:'on the greens', general:''};
+  Object.entries(S.mental).filter(([,v])=>v>=3).forEach(([k,v])=>{
+    const worst = Object.entries(S.mentalPhase).filter(([p])=>p!=='general')
+      .sort((a,b)=>b[1]-a[1])[0];
+    const where = worst && worst[1] ? ' Most of your mental faults land ' + phaseName[worst[0]] + '.' : '';
+    push(v*COST.mental/n, k, v+' occurrence'+(v===1?'':'s')+' across '+S.rounds+' round'+(S.rounds===1?'':'s')+'.' + where,
+      'Mental faults are the cheapest strokes on this list to buy back — they need a decision routine, not a range session.');
+  });
 
   return L.sort((a,b)=>b.cost-a.cost);
 }
@@ -1238,6 +1314,7 @@ function renderStats(){
   h += '<div class="tiles">'
     + tile('Scoring average', S.avgScore==null?'—':r1(S.avgScore), relPer==null?'':plus(r1(relPer))+' to par · '+S.rounds+' round'+(S.rounds===1?'':'s'))
     + tile('Drives in play', fmtPct(S.inPlayPct), 'Clear shot to green '+fmtPct(S.clearPct))
+    + tile('Fairways hit', fmtPct(S.fairwayPct), S.teeDir.F+' of '+S.teeDirN+' drives')
     + tile('Greens in reg', fmtPct(S.girPct), S.girN+' of '+S.appN+(S.avgProx?' · '+r1(S.avgProx)+' ft avg':''))
     + tile('Putts per round', S.puttsPerRound==null?'—':r1(S.puttsPerRound), S.threePutts+' three-putt'+(S.threePutts===1?'':'s')+' · '+S.onePutts+' one-putt'+(S.onePutts===1?'':'s'))
     + tile('SG putting', S.sgPuttPerRound==null?'—':plus(r2(S.sgPuttPerRound)), 'per round vs tour baseline', S.sgPuttPerRound>=0?'pos':'neg')
@@ -1271,12 +1348,29 @@ function renderStats(){
       hbar(teeRows,{labelW:80,aria:'Tee shot outcomes'}),
       tableView(['Result','Drives','Share'], teeRows.map(r=>[esc(r.k), r.v, fmtPct(pct(r.v,S.teeLogged))])));
 
-    const dirRows = [{k:'Left',v:S.teeDir.L||0},{k:'Straight',v:S.teeDir.straight||0},{k:'Right',v:S.teeDir.R||0}];
+    const dirRows = [
+      {k:'Left',    v:S.teeDir.L||0, t:(S.teeDir.L||0)+' ('+fmtPct(pct(S.teeDir.L||0,S.teeDirN))+')'},
+      {k:'Fairway', v:S.teeDir.F||0, t:(S.teeDir.F||0)+' ('+fmtPct(pct(S.teeDir.F||0,S.teeDirN))+')'},
+      {k:'Right',   v:S.teeDir.R||0, t:(S.teeDir.R||0)+' ('+fmtPct(pct(S.teeDir.R||0,S.teeDirN))+')'}
+    ];
     const offRows = OFFLINE.map(k=>({k, v:S.teeOff[k]||0}));
+    const distRows = [
+      {k:'Short',       v:S.teeDist.short||0},
+      {k:'As expected', v:S.teeDist.ok||0},
+      {k:'Long',        v:S.teeDist.long||0}
+    ];
+    const distOffRows = OFFLINE.map(k=>({k, v:S.teeDistOff[k]||0}));
     const strRows = TEE_STRIKE.map(k=>({k, v:S.teeStrike[k]||0}));
-    if (dirRows.some(r=>r.v)) h += box('Which way the misses went','Only logged when the drive was not good, so this is the shape of your bad ones.',hbar(dirRows,{labelW:70,aria:'Miss direction'}));
-    if (offRows.some(r=>r.v)) h += box('How far offline','Anything past 25 yards is where clear shots to the green start disappearing.',hbar(offRows,{labelW:80,aria:'Distance offline'}));
-    if (strRows.some(r=>r.v)) h += box('Strike location','Face contact on the drives that cost you. A one-sided pattern here is a Strike Plan job.',hbar(strRows,{labelW:60,aria:'Driver strike'}));
+
+    if (S.teeDirN) h += box('Where every drive finishes laterally',
+      'All '+S.teeDirN+' logged drives, not just the bad ones. A one-sided pattern is worth aiming off before it is worth fixing.',
+      hbar(dirRows,{labelW:70,aria:'Drive direction'}));
+    if (offRows.some(r=>r.v)) h += box('How far offline','Only counted on drives that missed the fairway. Past 25 yards is where clear shots to the green start disappearing.',hbar(offRows,{labelW:80,aria:'Distance offline'}));
+    if (S.teeDistN) h += box('Distance control off the tee','Whether the ball finished where you expected it to.',hbar(distRows,{labelW:96,aria:'Tee distance'}));
+    if (distOffRows.some(r=>r.v)) h += box('How far short or past','On the drives that missed your expected number.',hbar(distOffRows,{labelW:80,aria:'Tee distance miss'}));
+    if (strRows.some(r=>r.v)) h += box('Strike location',
+      'Face contact on every logged drive'+(S.middlePct!=null ? ' — middle on '+fmtPct(S.middlePct)+'' : '')+'. A one-sided pattern here is a Strike Plan job.',
+      hbar(strRows,{labelW:60,aria:'Driver strike'}));
   } else h += '<div class="note">No tee shots logged yet.</div>';
   h += '</div></div>';
 
@@ -1348,8 +1442,14 @@ function renderStats(){
   /* ---- mental ---- */
   const mRows = MENTAL.map(k=>({k,v:S.mental[k]||0})).filter(r=>r.v);
   if (mRows.length){
+    const phaseRows = [
+      {k:'Off the tee', v:S.mentalPhase.tee||0},
+      {k:'Approach',    v:S.mentalPhase.app||0},
+      {k:'Putting',     v:S.mentalPhase.putt||0}
+    ].concat(S.mentalPhase.general ? [{k:'Untagged phase', v:S.mentalPhase.general}] : []);
     h += '<div class="card"><div class="hd"><h3>Mental &amp; strategy</h3></div><div class="bd">'
       + box('Fault tally','Adam Young’s categories — good strike, good line, poor outcome.',hbar(mRows,{labelW:130,aria:'Mental faults'}))
+      + (phaseRows.some(r=>r.v) ? box('Where they happen','If one phase dominates, that is where the decision routine needs work.',hbar(phaseRows,{labelW:110,aria:'Mental faults by phase'})) : '')
       + '</div></div>';
   }
 
@@ -1453,27 +1553,34 @@ const q = v => v==null ? '' : /[",\n]/.test(String(v)) ? '"'+String(v).replace(/
 
 function csvShots(){
   const head = ['round_date','course','tees','hole','par','score','shot_type','club','outcome','direction','offline',
-    'strike','lie','yards_in','miss_zone','proximity','putt_distance_ft','break','slope','holed','left_ft','miss_reason','mental','note'];
+    'tee_distance','tee_distance_miss','strike','lie','yards_in','miss_zone','proximity',
+    'putt_distance_ft','break','slope','holed','left_ft','miss_reason','mental','note'];
   const rows = [head.join(',')];
+  const DIR = {L:'left', F:'fairway', R:'right'};
   DB.rounds.forEach(r=>r.holes.forEach(h=>{
     if (!holeTouched(h)) return;
     const base = [r.date, r.course, r.tees, h.n, h.par, h.score];
-    if (h.tee.outcome) rows.push(base.concat(['tee', h.tee.club, h.tee.outcome, h.tee.dir, h.tee.offline,
-      (h.tee.strike||[]).join('|'), '', '', '', '', '', '', '', '', '', '', (h.mental||[]).join('|'), h.note]).map(q).join(','));
-    if (h.app.state) rows.push(base.concat(['approach', h.app.club, h.app.state, '', '',
+    const m = h.mental || {};
+    if (h.tee.outcome || h.tee.dir) rows.push(base.concat(['tee', h.tee.club, h.tee.outcome,
+      DIR[h.tee.dir] || h.tee.dir, h.tee.offline, h.tee.dist, h.tee.distOff,
+      (h.tee.strike||[]).join('|'), '', '', '', '', '', '', '', '', '', '',
+      (m.tee||[]).join('|'), h.note]).map(q).join(','));
+    if (h.app.state) rows.push(base.concat(['approach', h.app.club, h.app.state, '', '', '', '',
       (h.app.strike||[]).join('|'), h.app.lie, h.app.dist, h.app.zone, h.app.prox, '', '', '', '', '', '',
-      (h.mental||[]).join('|'), h.note]).map(q).join(','));
-    h.short.forEach(s=>rows.push(base.concat(['short_game', '', '', '', '',
+      (m.app||[]).join('|'), h.note]).map(q).join(','));
+    h.short.forEach(s=>rows.push(base.concat(['short_game', '', '', '', '', '', '',
       (s.strike||[]).join('|'), s.lie, s.dist, '', s.prox, '', '', '', '', '', '', '', '']).map(q).join(',')));
-    h.putts.forEach((p,i)=>rows.push(base.concat(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', 'Green', '', '', '',
-      p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'), '', '']).map(q).join(',')));
+    h.putts.forEach((p,i)=>rows.push(base.concat(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', '', '',
+      'Green', '', '', '', p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'),
+      i===0 ? (m.putt||[]).join('|') : '', '']).map(q).join(',')));
   }));
   dl('shots.csv', rows.join('\n'));
 }
 function csvRounds(){
   const head = ['date','course','tees','course_rating','slope','handicap_index','course_handicap','net','score_differential',
     'conditions','wind','temp','feel','holes','strokes','par','to_par','putts',
-    'three_putts','drives_logged','in_play_pct','clear_shot_pct','gir_pct','scrambling_pct','sg_putting','notes'];
+    'three_putts','drives_logged','in_play_pct','clear_shot_pct','fairway_pct','short_pct','long_pct',
+    'gir_pct','scrambling_pct','sg_putting','notes'];
   const rows = [head.join(',')];
   DB.rounds.forEach(r=>{
     const t = roundTotal(r); if(!t) return;
@@ -1482,7 +1589,8 @@ function csvRounds(){
     const diff = t.n === 18 ? scoreDifferential(t.strokes, r.rating, r.slope) : null;
     rows.push([r.date,r.course,r.tees,r.rating,r.slope,r.index,ch,ch!=null?t.strokes-ch:null,diff!=null?r1(diff):null,
       r.conditions,r.wind,r.temp,r.feel,t.n,t.strokes,t.par,t.strokes-t.par,
-      totalPutts(r),S.threePutts,S.teeLogged,S.inPlayPct,S.clearPct,S.girPct,S.scrPct,r2(S.sgPutt),r.notes].map(q).join(','));
+      totalPutts(r),S.threePutts,S.teeLogged,S.inPlayPct,S.clearPct,S.fairwayPct,S.shortPct,S.longPct,
+      S.girPct,S.scrPct,r2(S.sgPutt),r.notes].map(q).join(','));
   });
   dl('rounds.csv', rows.join('\n'));
 }
@@ -1559,8 +1667,7 @@ function action(a, v, node, ev){
       const nr = newRound({
         date: $('#nrDate').value, course, tees: $('#nrTees').value.trim(),
         rating: numOrNull($('#nrRating')), slope: numOrNull($('#nrSlope')), index: numOrNull($('#nrIndex')),
-        wind: $('#nrWind').value, conditions: $('#nrCond').value,
-        temp: $('#nrTemp').value ? +$('#nrTemp').value : null,
+        wind: null, conditions: null, temp: null,
         feel: feelBtn ? +feelBtn.dataset.v : null
       });
       DB.rounds.push(nr); cur = {roundId:nr.id, hole:0}; saveNow(); render(); return;
@@ -1580,17 +1687,31 @@ function action(a, v, node, ev){
     case 'sc-par': h.score = h.score===h.par ? null : h.par; save(); render(); return;
     case 'quickpar': {
       h.score = h.par;
-      if (h.par!==3) h.tee.outcome = 'good';
+      if (h.par!==3){
+        h.tee.outcome = 'good';
+        h.tee.dir = 'F';  h.tee.offline = null;
+        h.tee.dist = 'ok'; h.tee.distOff = null;
+        if (!h.tee.strike.length) h.tee.strike = ['Middle'];
+      }
       h.app.state = 'gir';
-      if (!h.putts.length) h.putts = [
-        {dist:22, brk:null, slope:null, holed:false, rem:2, miss:[]},
-        {dist:2, brk:null, slope:null, holed:true, rem:null, miss:[]}
-      ];
-      save(); render(); toast('Par logged — edit the putt distances'); return;
+      saveNow(); render();
+      /* never invent putts — open the sheet and let the real ones be entered */
+      if (!h.putts.length) puttSheet(null);
+      return;
     }
     case 'tee-out':    h.tee.outcome = h.tee.outcome===v ? null : v; save(); render(); return;
-    case 'tee-dir':    h.tee.dir = h.tee.dir===v ? null : v; save(); render(); return;
+    case 'tee-dir': {
+      h.tee.dir = h.tee.dir===v ? null : v;
+      if (h.tee.dir === 'F' || h.tee.dir == null) h.tee.offline = null;   /* offline is meaningless in the fairway */
+      save(); render(); return;
+    }
     case 'tee-off':    h.tee.offline = h.tee.offline===v ? null : v; save(); render(); return;
+    case 'tee-dist': {
+      h.tee.dist = h.tee.dist===v ? null : v;
+      if (h.tee.dist === 'ok' || h.tee.dist == null) h.tee.distOff = null;
+      save(); render(); return;
+    }
+    case 'tee-distoff': h.tee.distOff = h.tee.distOff===v ? null : v; save(); render(); return;
     case 'tee-strike': toggleIn(h.tee.strike, v); save(); render(); return;
     case 'tee-club':   h.tee.club = v; save(); return;
     case 'app-state':  h.app.state = h.app.state===v ? null : v; if (h.app.state==='gir') h.app.zone=null; if (h.par===3) h.app.lie='Tee'; save(); render(); return;
@@ -1598,7 +1719,8 @@ function action(a, v, node, ev){
     case 'app-zone':   h.app.zone = h.app.zone===v ? null : v; save(); render(); return;
     case 'app-strike': toggleIn(h.app.strike, v); save(); render(); return;
     case 'app-club':   h.app.club = v; save(); return;
-    case 'mental':     toggleIn(h.mental, v); save(); render(); return;
+    case 'mental-tab': mentalTab = v; render(); return;
+    case 'mental':     toggleIn(h.mental[mentalTab], v); save(); render(); return;
     case 'add-putt':   puttSheet(null); return;
     case 'edit-putt':  puttSheet(+v); return;
     case 'del-putt':   h.putts.splice(+v,1); save(); render(); return;
@@ -1640,9 +1762,12 @@ function sheetAction(a, v, node, silent){
     case 'save': {
       if (tmp.dist==null || tmp.holed==null) return;
       const p = {dist:tmp.dist, brk:tmp.brk, slope:tmp.slope, holed:tmp.holed, rem:tmp.rem, miss:tmp.miss.slice()};
-      if (tmp._i==null) h.putts.push(p); else h.putts[tmp._i]=p;
-      /* keep score honest: if score already set below putt count, bump it */
-      saveNow(); closeSheet(); render(); return;
+      const isNew = tmp._i==null;
+      if (isNew) h.putts.push(p); else h.putts[tmp._i]=p;
+      saveNow(); closeSheet(); render();
+      /* a missed putt's remaining distance IS the next putt — walk straight into it */
+      if (isNew && !p.holed && p.rem!=null && p.rem > 0) puttSheet(null, p.rem);
+      return;
     }
     case 'sgdist':  tmp.dist = v===''?null:+v; syncSaveBtn(tmp.dist!=null); return;
     case 'sgLie':   tmp.lie = tmp.lie===v?null:v; drawShortSheet(); return;
@@ -1674,6 +1799,7 @@ function importFile(f){
       if (!confirm('Replace all current data with this backup? '+p.rounds.length+' rounds found.')) return;
       DB.rounds = p.rounds; DB.practice = Array.isArray(p.practice)?p.practice:[];
       DB.settings = Object.assign(DB.settings, p.settings||{});
+      DB.schema = p.schema; migrate();
       cur = {roundId:null, hole:0}; saveNow(); render(); toast('Restored '+p.rounds.length+' rounds');
     } catch(err){ toast('That file could not be read'); }
   };
@@ -1690,6 +1816,7 @@ document.addEventListener('keydown', e=>{
 
 /* ---------- boot ---------- */
 load();
+migrate();
 document.documentElement.dataset.theme = DB.settings.theme==='dark' ? 'dark' : 'light';
 const unfinished = DB.rounds.filter(r=>!r.finished).sort((a,b)=>b.created-a.created)[0];
 if (unfinished) cur.roundId = unfinished.id;
