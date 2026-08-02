@@ -107,8 +107,9 @@ the Accuracy Plan is the directional work.
 
 ### Short game
 
-Anything inside 50 yards: distance, lie, strike, and where it finished. Proximity is the
-number that decides your up-and-down rate — technique is downstream of it.
+Anything inside 50 yards: distance, lie, strike, and whether it found the green — with feet
+from the pin if it did, or yards remaining if it didn't. Proximity is the number that
+decides your up-and-down rate; technique is downstream of it.
 
 ### Putting
 
@@ -122,6 +123,26 @@ quality from 20+ feet, and strokes gained.
 Miss a putt and enter what you left yourself, and the next putt opens automatically with
 that distance already filled in — the distance remaining *is* the next putt, so you never
 type it twice. Close the sheet instead if the next one was conceded.
+
+### The chain
+
+Every distance you enter is the starting distance of the next shot, so the app hands it
+forward instead of asking twice:
+
+| You log | It opens |
+|---|---|
+| Approach on the green, 22 ft | Putt 1, pre-filled at 22 ft |
+| Approach missed, 15 yds out | Short-game shot, pre-filled at 15 yds |
+| Chip missed again, 6 yds left | Another short-game shot, pre-filled at 6 yds |
+| Chip on the green, 20 ft | Putt 1, pre-filled at 20 ft |
+| Putt missed, 3 ft left | Putt 2, pre-filled at 3 ft |
+
+The two hand-offs from the approach are buttons rather than automatic, because the
+approach card lives on the hole screen and shouldn't jump under your thumb while you're
+still filling it in. Everything downstream of that chains on save. Close any sheet to stop
+— a conceded putt or a picked-up ball leaves nothing phantom behind.
+
+Editing an existing shot never chains. Only new ones do.
 
 Make rate split by break direction is worth the extra tap on its own. A gap between
 left-to-righters and right-to-lefters is an aim or read bias, it's invisible in normal

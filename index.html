@@ -460,7 +460,7 @@ function newHole(i, par){
    Runs once at load. Never drops anything: tags logged before the phase split are
    parked under `general` and still counted, because we cannot know which phase they
    belonged to. */
-const SCHEMA = 2;
+const SCHEMA = 3;
 function migrate(){
   if (DB.schema === SCHEMA) return;
   let touched = 0;
@@ -471,6 +471,10 @@ function migrate(){
       if (h.tee.distOff === undefined) h.tee.distOff = null;
       if (!Array.isArray(h.tee.strike)) h.tee.strike = [];
     }
+    (h.short||[]).forEach(sg => {
+      if (sg.onGreen === undefined) sg.onGreen = null;   /* unknown for shots logged before the split */
+      if (sg.remYds  === undefined) sg.remYds  = null;
+    });
     if (Array.isArray(h.mental)){
       h.mental = {tee:[], app:[], putt:[], general: h.mental.slice()};
       touched++;
@@ -811,17 +815,30 @@ function holeScreen(r){
       + '<div class="fld" style="width:120px"><label>'+(h.app.state==='gir'?'Feet from pin':'Yards from pin')+'</label>'
       + '<input type="number" inputmode="numeric" data-act="app-prox" value="'+(h.app.prox??'')+'" placeholder="'+(h.app.state==='gir'?'22':'12')+'"></div></div>'
       + '<div class="row"><span class="lbl">Strike</span>'+segRow('app-strike',APP_STRIKE,h.app.strike)+'</div>';
+
+    /* carry the proximity straight into the next shot rather than retyping it */
+    if (h.app.state==='gir' && h.app.prox!=null && !h.putts.length)
+      ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-putt">'
+          + 'Log putt 1 from ' + h.app.prox + ' ft →</button></div>';
+    if (h.app.state==='miss' && h.app.prox!=null && !h.short.length)
+      ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-short">'
+          + 'Log the short-game shot from ' + h.app.prox + ' yds →</button></div>';
   }
   out += card('app','Approach',appBadge,ab);
 
   /* short game */
-  let sb = h.short.length ? h.short.map((s,i)=>
-    '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
-    + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')+'</b>'
-    + '<em>'+(s.prox!=null?'to '+s.prox+' ft':'proximity not logged')
-    + (s.strike && s.strike.length ? ' · '+s.strike.join(', ') : '')+'</em></div>'
-    + '<button class="del" data-act="edit-short" data-v="'+i+'">✎</button>'
-    + '<button class="del" data-act="del-short" data-v="'+i+'">🗑</button></div>').join('') : '';
+  let sb = h.short.length ? h.short.map((s,i)=>{
+    const res = s.onGreen === true
+        ? '<span class="holed">on the green</span>' + (s.prox!=null ? ', ' + s.prox + ' ft' : '')
+      : s.onGreen === false
+        ? 'missed again' + (s.remYds!=null ? ', ' + s.remYds + ' yds left' : '')
+      : (s.prox!=null ? 'to ' + s.prox + ' ft' : 'result not logged');
+    return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
+      + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')+'</b>'
+      + '<em>'+res+(s.strike && s.strike.length ? ' · '+s.strike.join(', ') : '')+'</em></div>'
+      + '<button class="del" data-act="edit-short" data-v="'+i+'">✎</button>'
+      + '<button class="del" data-act="del-short" data-v="'+i+'">🗑</button></div>';
+  }).join('') : '';
   sb += '<button class="btn ghost full" data-act="add-short">+ Add short-game shot</button>';
   out += card('short','Short game <span style="text-transform:none;letter-spacing:0">(inside 50y)</span>', h.short.length?h.short.length+'':'', sb);
 
@@ -912,23 +929,36 @@ function drawPuttSheet(){
 }
 
 /* ---------- short game sheet ---------- */
-function shortSheet(idx){
+function shortSheet(idx, preset){
   const h = H();
-  tmp = idx==null ? {dist:null, lie:null, strike:[], prox:null, ud:null} : JSON.parse(JSON.stringify(h.short[idx]));
+  tmp = idx==null
+    ? {dist:(preset==null?null:preset), lie:null, strike:[], onGreen:null, prox:null, remYds:null}
+    : JSON.parse(JSON.stringify(h.short[idx]));
   tmp._i = idx;
+  tmp._n = (idx==null ? h.short.length : idx) + 1;
+  tmp._chained = idx==null && preset!=null;
   drawShortSheet();
 }
 function drawShortSheet(){
   const s = tmp;
-  const b = '<div class="row"><div class="fld" style="width:130px"><label>Yards to pin</label>'
+  let b = (s._chained ? '<div class="note" style="margin:0 0 10px">Distance carried over from the shot before — change it if you paced it differently.</div>' : '')
+    + '<div class="row"><div class="fld" style="width:130px"><label>Yards to pin</label>'
     + '<input type="number" inputmode="numeric" data-sact="sgdist" value="'+(s.dist??'')+'" placeholder="25"></div></div>'
     + '<div class="row"><span class="lbl">Lie</span>'+segRow('sgLie',SG_LIES,s.lie,'sact')+'</div>'
     + '<div class="row"><span class="lbl">Strike</span>'+segRow('sgStrike',SG_STRIKE,s.strike,'sact')+'</div>'
-    + '<div class="row"><div class="fld" style="width:150px"><label>Finished (feet from pin)</label>'
-    + '<input type="number" inputmode="numeric" data-sact="sgprox" value="'+(s.prox??'')+'" placeholder="8"></div></div>'
-    + '<div class="row" style="margin-top:16px">'
-    + '<button class="btn full" data-sact="sgsave"'+(s.dist==null?' disabled':'')+'>Save shot</button></div>';
-  openSheet(tmp._i==null?'Add short-game shot':'Edit shot', b);
+    + '<hr class="sep">'
+    + '<div class="row"><span class="lbl">Where it finished</span>'
+    + segRow('sgOn',[{k:'yes',label:'On the green',cls:'ok'},{k:'no',label:'Missed again',cls:'bad'}],
+        s.onGreen===true?'yes':s.onGreen===false?'no':null,'sact')+'</div>';
+  if (s.onGreen === true)
+    b += '<div class="row"><div class="fld" style="width:150px"><label>Feet from pin</label>'
+      + '<input type="number" inputmode="numeric" data-sact="sgprox" value="'+(s.prox??'')+'" placeholder="8"></div></div>';
+  if (s.onGreen === false)
+    b += '<div class="row"><div class="fld" style="width:150px"><label>Yards from pin</label>'
+      + '<input type="number" inputmode="numeric" data-sact="sgrem" value="'+(s.remYds??'')+'" placeholder="12"></div></div>';
+  b += '<div class="row" style="margin-top:16px">'
+    + '<button class="btn full" data-sact="sgsave"'+(s.dist==null||s.onGreen==null?' disabled':'')+'>Save shot</button></div>';
+  openSheet((tmp._i==null ? 'Short-game shot ' : 'Edit short-game shot ') + tmp._n, b);
 }
 
 /* ---------- round summary ---------- */
@@ -976,7 +1006,8 @@ function summarise(rounds){
     teeDir:{L:0,F:0,R:0}, teeOff:{}, teeStrike:{}, teeDist:{short:0,ok:0,long:0}, teeDistOff:{},
     teeDirN:0, teeDistN:0, teeStrikeN:0,
     appN:0, girN:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
-    shortN:0, sgLie:{}, sgStrike:{}, sgProx:[], udAtt:0, udMade:0, scrAtt:0, scrMade:0,
+    shortN:0, sgLie:{}, sgStrike:{}, sgProx:[], sgOnGreen:0, sgResultN:0,
+    udAtt:0, udMade:0, scrAtt:0, scrMade:0,
     putts:0, threePutts:0, onePutts:0, sgPutt:0, sgPuttHoles:0,
     bucket:{}, breakMake:{}, puttMiss:{}, lagFrom:[], lagLeft:[],
     mental:{}, mentalPhase:{tee:0, app:0, putt:0, general:0}, perRound:[], leaks:[]
@@ -1037,6 +1068,7 @@ function summarise(rounds){
       /* short game */
       h.short.forEach(s=>{
         S.shortN++;
+        if (s.onGreen != null){ S.sgResultN++; if (s.onGreen) S.sgOnGreen++; }
         if (s.lie){ S.sgLie[s.lie]=S.sgLie[s.lie]||{n:0,prox:[]}; S.sgLie[s.lie].n++; if(s.prox!=null) S.sgLie[s.lie].prox.push(s.prox); }
         (s.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
         if (s.prox!=null) S.sgProx.push(s.prox);
@@ -1084,6 +1116,7 @@ function summarise(rounds){
   S.girPct    = pct(S.girN, S.appN);
   S.scrPct    = pct(S.scrMade, S.scrAtt);
   S.udPct     = pct(S.udMade, S.udAtt);
+  S.sgOnGreenPct = pct(S.sgOnGreen, S.sgResultN);
   S.avgScore  = S.scored ? S.strokes / S.rounds : null;
   S.toPar     = S.scored ? (S.strokes - S.parTotal) : null;
   S.puttsPerRound = S.rounds ? S.putts / S.rounds : null;
@@ -1434,6 +1467,7 @@ function renderStats(){
       + '<div class="tiles">'
       + tile('Up &amp; down', fmtPct(S.udPct), S.udMade+' of '+S.udAtt+' attempts')
       + tile('Avg proximity', S.sgProx.length?r1(avg(S.sgProx))+'<small> ft</small>':'—', S.shortN+' shots logged')
+      + (S.sgResultN ? tile('Found the green', fmtPct(S.sgOnGreenPct), S.sgOnGreen+' of '+S.sgResultN+' short-game shots') : '')
       + '</div>'
       + (sgRows.length ? box('Average proximity by lie','Shorter is better. This is the number that decides your up-and-down rate.',hbar(sgRows,{labelW:96,aria:'Short game proximity by lie'})) : '')
       + '</div></div>';
@@ -1568,8 +1602,10 @@ function csvShots(){
     if (h.app.state) rows.push(base.concat(['approach', h.app.club, h.app.state, '', '', '', '',
       (h.app.strike||[]).join('|'), h.app.lie, h.app.dist, h.app.zone, h.app.prox, '', '', '', '', '', '',
       (m.app||[]).join('|'), h.note]).map(q).join(','));
-    h.short.forEach(s=>rows.push(base.concat(['short_game', '', '', '', '', '', '',
-      (s.strike||[]).join('|'), s.lie, s.dist, '', s.prox, '', '', '', '', '', '', '', '']).map(q).join(',')));
+    h.short.forEach(s=>rows.push(base.concat(['short_game', '',
+      s.onGreen===true?'on green':s.onGreen===false?'missed green':'', '', '', '', '',
+      (s.strike||[]).join('|'), s.lie, s.dist, '', s.onGreen===false ? s.remYds : s.prox,
+      '', '', '', '', '', '', '', '']).map(q).join(',')));
     h.putts.forEach((p,i)=>rows.push(base.concat(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', '', '',
       'Green', '', '', '', p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'),
       i===0 ? (m.putt||[]).join('|') : '', '']).map(q).join(',')));
@@ -1724,6 +1760,8 @@ function action(a, v, node, ev){
     case 'add-putt':   puttSheet(null); return;
     case 'edit-putt':  puttSheet(+v); return;
     case 'del-putt':   h.putts.splice(+v,1); save(); render(); return;
+    case 'chain-putt':  puttSheet(null, h.app.prox); return;
+    case 'chain-short': shortSheet(null, h.app.prox); return;
     case 'add-short':  shortSheet(null); return;
     case 'edit-short': shortSheet(+v); return;
     case 'del-short':  h.short.splice(+v,1); save(); render(); return;
@@ -1772,12 +1810,22 @@ function sheetAction(a, v, node, silent){
     case 'sgdist':  tmp.dist = v===''?null:+v; syncSaveBtn(tmp.dist!=null); return;
     case 'sgLie':   tmp.lie = tmp.lie===v?null:v; drawShortSheet(); return;
     case 'sgStrike':toggleIn(tmp.strike, v); drawShortSheet(); return;
+    case 'sgOn':    tmp.onGreen = v==='yes'; if (tmp.onGreen) tmp.remYds=null; else tmp.prox=null; drawShortSheet(); return;
     case 'sgprox':  tmp.prox = v===''?null:+v; return;
+    case 'sgrem':   tmp.remYds = v===''?null:+v; return;
     case 'sgsave': {
-      if (tmp.dist==null) return;
-      const s = {dist:tmp.dist, lie:tmp.lie, strike:tmp.strike.slice(), prox:tmp.prox};
-      if (tmp._i==null) h.short.push(s); else h.short[tmp._i]=s;
-      saveNow(); closeSheet(); render(); return;
+      if (tmp.dist==null || tmp.onGreen==null) return;
+      const sg = {dist:tmp.dist, lie:tmp.lie, strike:tmp.strike.slice(),
+                  onGreen:tmp.onGreen, prox:tmp.prox, remYds:tmp.remYds};
+      const isNew = tmp._i==null;
+      if (isNew) h.short.push(sg); else h.short[tmp._i]=sg;
+      saveNow(); closeSheet(); render();
+      /* keep walking the hole: on the green means putts, still short means another chip */
+      if (isNew){
+        if (sg.onGreen && sg.prox!=null && !h.putts.length) puttSheet(null, sg.prox);
+        else if (!sg.onGreen && sg.remYds!=null && sg.remYds>0) shortSheet(null, sg.remYds);
+      }
+      return;
     }
     case 'rnote':  { const r=R(); if(r){ r.notes = v; save(); } return; }
     case 'close':  closeSheet(); render(); return;
