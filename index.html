@@ -1683,7 +1683,7 @@ function renderData(){
   const bytes = (localStorage.getItem(KEY)||'').length;
   const shots = DB.rounds.reduce((a,r)=>a + r.holes.reduce((b,h)=>b + h.putts.length + h.short.length + (h.tee.outcome?1:0) + (h.app.state&&h.app.state!=='na'?1:0),0),0);
   const h = card('exp','Export','',
-      '<div class="note" style="margin:0 0 12px">Everything lives in this browser only. Export regularly — clearing site data wipes it.</div>'
+      '<div class="note" style="margin:0 0 12px">Synced across your devices, but a backup you hold is still worth keeping — export now and then.</div>'
     + '<div class="row"><button class="btn ghost grow" data-act="csv-shots">Shot CSV</button>'
     + '<button class="btn ghost grow" data-act="csv-rounds">Round CSV</button></div>'
     + '<div class="row"><button class="btn ghost grow" data-act="csv-putts">Putting CSV</button>'
