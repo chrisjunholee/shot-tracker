@@ -204,15 +204,34 @@ The tour baselines are a yardstick, not a target. What matters is your own numbe
 
 ## Your data
 
-Everything is in this browser's local storage, on this device only. Nothing is uploaded.
+Every device writes to its own browser storage first, so the app works with no signal and
+never waits on the network. In the background it mirrors to a private Firebase Realtime
+Database, which is what keeps the phone and the laptop showing the same rounds.
 
-That means: **export regularly.** Data → Export gives you a full JSON backup (restorable
-from the same screen) and three CSVs — one row per shot, one row per round, one row per
-putt — if you want to run your own analysis. Clearing browser data for the site deletes
-everything, and there is no copy anywhere else.
+**Merging is per round, newest edit wins.** Log a hole on the phone and it appears on the
+laptop within a second or two; edit the same round in both places and the later edit
+stands. Deleting a round deletes it everywhere. Nothing is ever merged half a round at a
+time, so a round is always internally consistent.
 
-Rounds sync to nothing, so the phone you log on is the phone that holds the history. If
-that becomes a problem, this can be pointed at a Firebase project later without a rewrite.
+Records travel as JSON strings rather than as trees, because Realtime Database silently
+drops nulls and empty arrays — an unplayed hole's `score: null` would come back as missing
+and the hole would be subtly wrong. A string round-trips exactly.
+
+### How it's secured
+
+There is no sign-in. The database path is a 144-bit random string and the security rules
+grant read and write to that path and nothing else — the database root returns *permission
+denied*. The path is therefore the credential: anyone who has the URL has the rounds. It is
+in `index.html`, which is public, so treat this as private-by-obscurity rather than as
+access control. If that ever stops being good enough, the fix is Firebase anonymous auth
+and a rule keyed to the user id; the sync layer would not otherwise change.
+
+Sync status lives at the bottom of the Data screen, along with a **Sync now** button.
+Rounds logged offline queue there and upload when you reconnect.
+
+**Export anyway.** Data → Export gives you a full JSON backup (restorable from the same
+screen) and three CSVs — one row per shot, one row per round, one row per putt — if you
+want to run your own analysis.
 
 ---
 

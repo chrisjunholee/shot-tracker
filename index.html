@@ -439,7 +439,8 @@ function toast(msg){
 }
 
 /* ---------- store ---------- */
-let DB = { rounds: [], practice: [], settings: { theme:'light', collapsed:{}, name:'' } };
+let DB = { rounds: [], practice: [], tomb: {rounds:{}, practice:{}},
+           settings: { theme:'light', collapsed:{}, name:'' } };
 
 function load(){
   try {
@@ -449,6 +450,9 @@ function load(){
       DB.rounds   = Array.isArray(p.rounds) ? p.rounds : [];
       DB.practice = Array.isArray(p.practice) ? p.practice : [];
       DB.settings = Object.assign(DB.settings, p.settings || {});
+      DB.tomb     = (p.tomb && typeof p.tomb === 'object') ? p.tomb : {rounds:{}, practice:{}};
+      if (!DB.tomb.rounds)   DB.tomb.rounds   = {};
+      if (!DB.tomb.practice) DB.tomb.practice = {};
       DB.schema   = p.schema;
     }
   } catch(e){ console.warn('load failed', e); }
@@ -459,9 +463,14 @@ function save(){
   saveT = setTimeout(()=>{
     try { localStorage.setItem(KEY, JSON.stringify(DB)); }
     catch(e){ toast('Storage full — export your data'); }
+    if (typeof syncTouch === 'function') syncTouch();
   }, 120);
 }
-function saveNow(){ clearTimeout(saveT); try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){} }
+function saveNow(){
+  clearTimeout(saveT);
+  try{ localStorage.setItem(KEY, JSON.stringify(DB)); }catch(e){}
+  if (typeof syncTouch === 'function') syncTouch();
+}
 
 /* ---------- model ---------- */
 function newHole(i, par){
@@ -603,6 +612,7 @@ function closeSheet(){
   $('#sheet').classList.remove('on'); $('#sheetBg').classList.remove('on');
   document.body.style.overflow='';
   sheetSave = null;
+  if (typeof syncFlushRender === 'function') syncFlushRender();
 }
 
 /* ---------- UI builders ---------- */
@@ -1687,12 +1697,18 @@ function renderData(){
     + tile('Practice', DB.practice.length, Math.round(bytes/1024)+' KB used')
     + '</div>'
     + '<div class="row" style="margin-top:14px"><button class="btn danger full" data-act="wipe">Delete all data</button></div>')
+  + card('sync','Sync','',
+      '<div class="note" style="margin:0" id="syncLine">' + syncLine() + '</div>'
+    + '<div class="note" style="margin:10px 0 0">Rounds sync to a private cloud copy shared by every device you open this on. '
+    + 'Newest edit wins, per round, so logging on your phone and reviewing on your laptop can no longer lose anything. '
+    + 'It keeps working with no signal and catches up when you reconnect.</div>'
+    + '<div class="row" style="margin-top:14px"><button class="btn ghost full" data-act="syncnow">Sync now</button></div>')
   + card('about','About this tracker','',
       '<div class="note" style="margin:0">Built on Adam Young’s shot tracker: log errors, not everything. Tee shots and approaches are only '
     + 'recorded in detail when they cost you, which keeps it to a few taps a hole. Putting is the exception — every putt is logged, '
     + 'because make rates and strokes gained need the full denominator.<br><br>'
     + 'Strokes gained putting uses an approximate PGA Tour expected-putts curve. It is a yardstick, not gospel — the round-to-round '
-    + 'movement is what to read.<br><br>Data never leaves your device.</div>');
+    + 'movement is what to read.<br><br>Data is stored on this device and mirrored to your own private cloud copy — see Sync above.</div>');
   $('#dataWrap').innerHTML = h;
 }
 
@@ -1907,6 +1923,7 @@ function action(a, v, node, ev){
       pDraft = {areas:[], qual:3, notes:''}; saveNow(); renderPractice(); toast('Session saved'); return;
     }
     case 'pdel': DB.practice = DB.practice.filter(x=>x.id!==v); saveNow(); renderPractice(); return;
+    case 'syncnow': syncScan(); syncPush(); if (!es || es.readyState === 2) syncStream(); toast('Syncing'); return;
     case 'csv-shots':  csvShots(); return;
     case 'csv-rounds': csvRounds(); return;
     case 'csv-putts':  csvPutts(); return;
@@ -1914,7 +1931,8 @@ function action(a, v, node, ev){
     case 'wipe':
       if (!confirm('Delete every round and practice session? Export first if you want a copy.')) return;
       if (!confirm('Last chance — this cannot be undone.')) return;
-      DB = {rounds:[], practice:[], settings:DB.settings}; cur={roundId:null,hole:0}; saveNow(); render(); toast('All data deleted'); return;
+      DB = {rounds:[], practice:[], tomb:DB.tomb, schema:DB.schema, settings:DB.settings};
+      cur={roundId:null,hole:0}; saveNow(); render(); toast('All data deleted'); return;
   }
 }
 
@@ -2012,6 +2030,217 @@ document.addEventListener('keydown', e=>{
   if (e.key==='ArrowRight') action('next');
 });
 
+
+/* ---------- cloud sync ----------
+   Firebase Realtime Database over plain REST + server-sent events. No SDK, so the app
+   stays a single file with no dependencies and still opens offline.
+
+   The path below IS the credential: 144 random bits, and the database rules grant
+   read/write to that path and to nothing else. Anyone with the URL has the rounds;
+   nobody without it can reach anything, including the database root.
+
+   Records are stored as JSON *strings* rather than as trees, because Realtime Database
+   silently drops nulls and empty arrays — `strike: []` and `score: null` would come back
+   as undefined and the hole would be subtly wrong. A string round-trips exactly. */
+const SYNC_URL  = 'https://shot-tracker-ac928-default-rtdb.firebaseio.com';
+const SYNC_PATH = 'st-zXi4mbn4815C-8BJpocfHRjW';
+const SYNC_BASE = SYNC_URL + '/' + SYNC_PATH;
+
+let syncState  = 'connecting';        /* connecting | live | offline | error */
+let syncSeen   = 0;                   /* last successful exchange */
+let syncPend   = false;               /* a render was deferred because a sheet was open */
+let remoteTree = {rounds:{}, practice:{}};
+const snap  = {rounds:Object.create(null), practice:Object.create(null)};
+const dirty = new Map();
+let scanT, pushT, retryT, es;
+
+const KINDS = ['rounds','practice'];
+const listOf = k => k === 'rounds' ? DB.rounds : DB.practice;
+
+function syncSetState(s){
+  syncState = s;
+  const el = document.getElementById('syncLine');
+  if (el) el.innerHTML = syncLine();
+}
+function syncLine(){
+  const n = dirty.size;
+  const ago = syncSeen ? Math.round((Date.now()-syncSeen)/1000) : null;
+  const when = ago==null ? 'not yet' : ago < 60 ? 'just now'
+             : ago < 3600 ? Math.round(ago/60)+' min ago' : Math.round(ago/3600)+' h ago';
+  const head = syncState==='live' ? 'Live — this device and your phone are in step.'
+             : syncState==='connecting' ? 'Connecting…'
+             : 'Offline. Rounds are saved here and go up when you reconnect.';
+  return head + '<br>Last exchange: ' + when + (n ? ' · ' + n + ' waiting to upload' : '');
+}
+
+/* Detect local edits by diffing each record against the last value we reconciled. Doing
+   it this way leaves every existing mutation path untouched — nothing has to remember to
+   mark itself dirty, including deletes, which show up as an id that has gone missing. */
+function syncScan(){
+  KINDS.forEach(kind => {
+    const seen = Object.create(null), sn = snap[kind];
+    listOf(kind).forEach(rec => {
+      if (!rec || !rec.id) return;
+      seen[rec.id] = 1;
+      const known = sn[rec.id] !== undefined;
+      if (!rec.updated) rec.updated = rec.created || Date.parse(rec.date) || 0;
+      const j = JSON.stringify(rec);
+      if (sn[rec.id] === j) return;
+      if (known) { rec.updated = Date.now(); }           /* a real edit, this session */
+      sn[rec.id] = JSON.stringify(rec);
+      syncQueue(kind, rec.id, {updated: rec.updated, json: sn[rec.id]});
+    });
+    Object.keys(sn).forEach(id => {
+      if (seen[id]) return;
+      delete sn[id];
+      const t = Date.now();
+      DB.tomb[kind][id] = t;
+      syncQueue(kind, id, {updated: t, deleted: true});
+    });
+  });
+}
+function syncTouch(){ clearTimeout(scanT); scanT = setTimeout(syncScan, 400); }
+
+function syncQueue(kind, id, rec){
+  const rem = remoteTree[kind] && remoteTree[kind][id];
+  if (rem && (rem.updated||0) >= (rec.updated||0) && !!rem.deleted === !!rec.deleted
+      && rem.json === rec.json) return;                  /* already up there, byte for byte */
+  dirty.set(kind + '/' + id, rec);
+  clearTimeout(pushT); pushT = setTimeout(syncPush, 700);
+  syncSetState(syncState);
+}
+
+async function syncPush(){
+  clearTimeout(retryT);
+  if (!dirty.size) return;
+  for (const [k, rec] of Array.from(dirty.entries())){
+    try {
+      const res = await fetch(SYNC_BASE + '/' + k + '.json',
+        {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(rec)});
+      if (!res.ok) throw new Error(res.status);
+      dirty.delete(k);
+      syncPut(remoteTree, k.split('/'), rec);
+      syncSeen = Date.now();
+    } catch(e){
+      syncSetState('offline');
+      retryT = setTimeout(syncPush, 15000);
+      return;
+    }
+  }
+  syncSetState(es && es.readyState === 1 ? 'live' : syncState);
+}
+
+/* Apply a remote snapshot. Newest edit wins, per record — which is what stops the
+   export/import shuffle from ever losing a round again. */
+function syncMerge(tree){
+  let changed = false;
+  KINDS.forEach(kind => {
+    const m = (tree && tree[kind]) || {}, list = listOf(kind);
+    Object.keys(m).forEach(id => {
+      const rec = m[id]; if (!rec) return;
+      const ru = rec.updated || 0;
+      const i  = list.findIndex(x => x && x.id === id);
+      const lu = i > -1 ? (list[i].updated || 0) : (DB.tomb[kind][id] || 0);
+      if (ru <= lu) return;
+      if (rec.deleted){
+        if (i > -1){ list.splice(i,1); changed = true; }
+        DB.tomb[kind][id] = ru;
+        delete snap[kind][id];
+        if (kind === 'rounds' && cur.roundId === id) cur = {roundId:null, hole:0};
+      } else if (rec.json){
+        let v; try { v = JSON.parse(rec.json); } catch(e){ return; }
+        if (!v || typeof v !== 'object') return;
+        v.id = id; v.updated = ru;
+        if (i > -1) list[i] = v; else list.push(v);
+        snap[kind][id] = JSON.stringify(v);
+        changed = true;
+      }
+    });
+  });
+  if (changed){
+    DB.schema = 0; migrate();          /* incoming rounds may predate a schema bump */
+    saveNow();
+    syncRender();
+  }
+  return changed;
+}
+
+/* Never redraw under someone's thumb: if a sheet is open or a field has focus, wait. */
+function syncRender(){
+  const sheet = document.getElementById('sheet');
+  const busy  = (sheet && sheet.classList.contains('on'))
+             || (document.activeElement && document.activeElement.matches('input,textarea,select'));
+  if (busy){ syncPend = true; return; }
+  syncPend = false;
+  render();
+}
+function syncFlushRender(){ if (syncPend) setTimeout(syncRender, 60); }
+
+function syncPut(o, p, val){
+  if (!p.length) return;
+  let t = o;
+  for (let i=0;i<p.length-1;i++){
+    if (typeof t[p[i]] !== 'object' || t[p[i]] === null) t[p[i]] = {};
+    t = t[p[i]];
+  }
+  const last = p[p.length-1];
+  if (val === null) delete t[last]; else t[last] = val;
+}
+function syncNorm(t){
+  const o = (t && typeof t === 'object') ? t : {};
+  if (!o.rounds   || typeof o.rounds   !== 'object') o.rounds   = {};
+  if (!o.practice || typeof o.practice !== 'object') o.practice = {};
+  return o;
+}
+
+function syncEvent(type, raw){
+  let m; try { m = JSON.parse(raw); } catch(e){ return; }
+  if (!m || typeof m.path !== 'string') return;
+  syncSeen = Date.now();
+  const p = m.path === '/' ? [] : m.path.split('/').filter(Boolean);
+  if (type === 'put'){
+    if (!p.length) remoteTree = syncNorm(m.data);
+    else syncPut(remoteTree, p, m.data);
+  } else {
+    Object.keys(m.data || {}).forEach(k =>
+      syncPut(remoteTree, p.concat(k.split('/').filter(Boolean)), m.data[k]));
+  }
+  remoteTree = syncNorm(remoteTree);
+  syncMerge(remoteTree);
+  syncSetState('live');
+}
+
+function syncStream(){
+  if (!('EventSource' in window)) return;
+  try { es = new EventSource(SYNC_BASE + '.json'); } catch(e){ return; }
+  es.addEventListener('put',        e => syncEvent('put', e.data));
+  es.addEventListener('patch',      e => syncEvent('patch', e.data));
+  es.addEventListener('keep-alive', () => { syncSeen = Date.now(); syncSetState('live'); });
+  es.onopen  = () => { syncSetState('live'); syncPush(); };
+  es.onerror = () => syncSetState('offline');   /* EventSource reconnects on its own */
+}
+
+async function syncStart(){
+  if (!DB.tomb) DB.tomb = {rounds:{}, practice:{}};
+  if (!DB.tomb.rounds)   DB.tomb.rounds   = {};
+  if (!DB.tomb.practice) DB.tomb.practice = {};
+  syncSetState('connecting');
+  try {
+    const res = await fetch(SYNC_BASE + '.json', {cache:'no-store'});
+    if (!res.ok) throw new Error(res.status);
+    remoteTree = syncNorm(await res.json());
+    syncSeen = Date.now();
+    syncMerge(remoteTree);
+  } catch(e){ syncSetState('offline'); }
+  syncScan();                 /* first pass seeds the snapshots and uploads anything new */
+  syncPush();
+  syncStream();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden){ syncTouch(); syncPush(); }
+  });
+  window.addEventListener('online', () => { syncPush(); if (!es || es.readyState === 2) syncStream(); });
+}
+
 /* ---------- boot ---------- */
 load();
 migrate();
@@ -2019,6 +2248,7 @@ document.documentElement.dataset.theme = DB.settings.theme==='dark' ? 'dark' : '
 const unfinished = DB.rounds.filter(r=>!r.finished).sort((a,b)=>b.created-a.created)[0];
 if (unfinished) cur.roundId = unfinished.id;
 render();
+syncStart();
 
 if ('serviceWorker' in navigator){
   window.addEventListener('load', ()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
