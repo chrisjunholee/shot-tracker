@@ -22,6 +22,11 @@
   --good-ink:#006300;
   --sc-birdie:#1f66bd; --sc-par:#157f3a; --sc-bogey:#b8501c; --sc-double:#bf2f24;
   --seq1:#cde2fb; --seq2:#9ec5f4; --seq3:#6da7ec; --seq4:#3987e5; --seq5:#256abf; --seq6:#184f95;
+  /* ink for a label sitting ON a filled mark. It has to clear 4.5:1 against the fill,
+     not against the page, so it is not --ink. Measured against all four diverging fills:
+     white tops out at 4.42:1 and fails everywhere; #0b0b0b misses on light blue at 4.46:1;
+     pure black clears all four (4.76 / 5.31 / 5.77 / 6.50). Same value in both themes. */
+  --on-mark:#000000;
   --r:12px; --pad:14px;
   --safe-b:env(safe-area-inset-bottom,0px);
 }
@@ -36,6 +41,7 @@
   --good-ink:#0ca30c;
   --sc-birdie:#2a78d6; --sc-par:#18913f; --sc-bogey:#cc5a1f; --sc-double:#cf3629;
   --seq1:#184f95; --seq2:#256abf; --seq3:#2a78d6; --seq4:#3987e5; --seq5:#6da7ec; --seq6:#9ec5f4;
+  --on-mark:#000000;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -234,6 +240,7 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 svg{display:block;width:100%;overflow:visible}
 svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--muted)}
 svg text.val{fill:var(--ink-2);font-weight:650;font-variant-numeric:tabular-nums}
+svg text.val.on{fill:var(--on-mark)}
 svg text.lab{fill:var(--ink-2)}
 svg .gl{stroke:var(--grid);stroke-width:1}
 svg .ax{stroke:var(--axis);stroke-width:1}
@@ -403,6 +410,23 @@ const PUTT_BUCKETS = [
   {k:'20–30 ft',lo:20.001,hi:30.001,base:.11},
   {k:'30 ft +', lo:30.001,hi:1e9,  base:.05}
 ];
+
+/* Approach distance bands — four, in display order.
+   Six bands (<100 / 100-125 / 125-150 / 150-175 / 175-200 / 200+) left 4-13 approaches
+   per bucket over a season, and the gaps between neighbours were sampling noise being
+   read as form: 175-200 showed 40% while 150-175 showed 15%, which is not a dip in the
+   game, it is four shots. Four bands carry the real shape — a high rate inside 150,
+   then the cliff — with half the sampling error.
+   The chart iterates THIS array, so display order never depends on the order bands
+   happened to be encountered while walking the shots. */
+const APP_BANDS = [
+  {k:'<100y',    hi:100},
+  {k:'100\u2013150y', hi:150},
+  {k:'150\u2013200y', hi:200},
+  {k:'200y+',    hi:Infinity}
+];
+const APP_MIN_N = 5;   /* below this a band is greyed and labelled — too few to read */
+const appBand = d => d==null ? null : (APP_BANDS.find(b => d < b.hi) || APP_BANDS[APP_BANDS.length-1]).k;
 
 const PRACTICE_AREAS = ['Driver / tee shots','Long game strike','Iron strike','Iron distance control',
   'Wedges 50–110y','Short game / chipping','Bunker','Putting – short','Putting – lag',
@@ -1139,7 +1163,7 @@ function summarise(rounds){
       /* approach */
       if (h.app.state==='gir' || h.app.state==='miss'){
         S.appN++; rs.girN++;
-        const band = h.app.dist==null ? null : h.app.dist<100?'<100y':h.app.dist<125?'100–125y':h.app.dist<150?'125–150y':h.app.dist<175?'150–175y':h.app.dist<200?'175–200y':'200y+';
+        const band = appBand(h.app.dist);
         if (band){ S.appDistBand[band] = S.appDistBand[band] || {n:0,gir:0}; S.appDistBand[band].n++; }
         if (h.app.state==='gir'){
           S.girN++; rs.gir++;
@@ -1361,20 +1385,30 @@ function divBar(rows, opts){
   const W=480, BH=24, GAP=8, PL=108, PR=8;
   const H = rows.length*(BH+GAP)+8;
   const max = Math.max(0.5, ...rows.map(r=>Math.abs(r.v)));
-  /* the value sits outside the bar end, so it needs its own gutter each side —
-     without this a full-width negative bar pushes its value onto the row label */
-  const VW = Math.max.apply(null, rows.map(r => plus(r2(r.v)).length))*CHW + 10;
-  const half = Math.max(20, (W - PL - PR - 2*VW)/2);
-  const mid = PL + VW + half;
+  /* The value is drawn INSIDE the bar whenever the bar is long enough to hold it —
+     which is what stops the longest negative bar from pushing its label back over the
+     row name. Only bars too short to hold the text fall back to an outside label, and
+     a short bar's outside label reaches at most 2*VW+20 past the axis, so a gutter is
+     reserved only when the plot is narrower than that. It never is at this width, so
+     the bars get the full half-width back. */
+  const VW   = Math.max.apply(null, rows.map(r => plus(r2(r.v)).length)) * CHW;
+  const span = (W - PL - PR)/2;
+  const G    = Math.max(0, (2*VW + 20) - span)/2;
+  const half = Math.max(20, span - G);
+  const mid  = PL + G + half;
   let s = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+esc(opts.aria||'')+'">';
   s += '<line class="ax" x1="'+mid+'" y1="0" x2="'+mid+'" y2="'+(H-4)+'"/>';
   rows.forEach((r,i)=>{
     const y=i*(BH+GAP)+2, w = half*Math.abs(r.v)/max;
     const x = r.v>=0 ? mid : mid-w;
     const fill = r.v>=0 ? 'var(--s1)' : 'var(--s8)';
+    const lbl = plus(r2(r.v)), tw = lbl.length*CHW, inside = w > tw + 12;
+    /* inside: hard against the far end of the bar. outside: just past it, as before. */
+    const vx = inside ? (r.v>=0 ? x+w-6 : x+6) : (r.v>=0 ? x+w+8 : x-8);
+    const va = inside ? (r.v>=0 ? 'end' : 'start') : (r.v>=0 ? 'start' : 'end');
     s += '<text class="lab" x="0" y="'+(y+BH/2+4)+'">'+esc(trunc(String(r.k), PL-10))+'<title>'+esc(r.k)+'</title></text>';
-    s += '<rect class="mk" x="'+x+'" y="'+y+'" width="'+Math.max(w,2)+'" height="'+BH+'" rx="4" fill="'+fill+'"><title>'+esc(r.k)+': '+plus(r2(r.v))+'</title></rect>';
-    s += '<text class="val" x="'+(r.v>=0 ? x+w+8 : x-8)+'" y="'+(y+BH/2+4)+'" text-anchor="'+(r.v>=0?'start':'end')+'">'+plus(r2(r.v))+'</text>';
+    s += '<rect class="mk" x="'+x+'" y="'+y+'" width="'+Math.max(w,2)+'" height="'+BH+'" rx="4" fill="'+fill+'"><title>'+esc(r.k)+': '+lbl+'</title></rect>';
+    s += '<text class="val'+(inside?' on':'')+'" x="'+vx+'" y="'+(y+BH/2+4)+'" text-anchor="'+va+'">'+lbl+'</text>';
   });
   return s+'</svg>';
 }
@@ -1530,9 +1564,18 @@ function renderStats(){
     const appStr = APP_STRIKE.map(k=>({k,v:S.appStrike[k]||0}));
     if (appStr.some(r=>r.v)) h += box('Contact on the misses','Fat and thin are ground contact; toe and heel are face contact. They are different problems with different fixes.',hbar(appStr,{labelW:60,aria:'Approach strike'}));
 
-    const bands = Object.entries(S.appDistBand).sort((a,b)=>parseInt(a[0])-parseInt(b[0]));
-    if (bands.length) h += box('Greens hit by distance','Where your effective range ends.',
-      hbar(bands.map(([k,v])=>({k, v: pct(v.gir,v.n)||0, t:fmtPct(pct(v.gir,v.n))+' ('+v.gir+'/'+v.n+')'})),{labelW:80,aria:'GIR by distance'}));
+    /* Bands with no approaches are omitted rather than drawn at 0%: a zero-length bar
+       reads as "you never hit this green", when in fact you were never in that range. */
+    const bands = APP_BANDS.map(b => ({b, d: S.appDistBand[b.k]})).filter(x => x.d && x.d.n);
+    const thin  = bands.filter(x => x.d.n < APP_MIN_N).length;
+    if (bands.length) h += box('Greens hit by distance',
+      'Where your effective range ends.' + (thin ? ' Greyed bands have fewer than '+APP_MIN_N+' approaches — too few to read anything into.' : ''),
+      hbar(bands.map(({b,d})=>({
+        k: b.k,
+        v: pct(d.gir,d.n)||0,
+        t: fmtPct(pct(d.gir,d.n))+' ('+d.gir+'/'+d.n+(d.n<APP_MIN_N?', small n':'')+')',
+        fill: d.n<APP_MIN_N ? 'var(--muted)' : 'var(--s1)'
+      })),{labelW:80,aria:'GIR by distance'}));
   } else h += '<div class="note">No approaches logged yet.</div>';
   h += '</div></div>';
 
