@@ -19,7 +19,7 @@
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
   --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
   --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
-  --good-ink:#006300;
+  --good-ink:#006300; --bad-ink:#bf2f24;
   --sc-birdie:#1f66bd; --sc-par:#157f3a; --sc-bogey:#b8501c; --sc-double:#bf2f24;
   --seq1:#cde2fb; --seq2:#9ec5f4; --seq3:#6da7ec; --seq4:#3987e5; --seq5:#256abf; --seq6:#184f95;
   /* ink for a label sitting ON a filled mark. It has to clear 4.5:1 against the fill,
@@ -38,7 +38,7 @@
   --brand:#1baf7a; --brand-2:#199e70; --brand-wash:#16261f;
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
   --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-  --good-ink:#0ca30c;
+  --good-ink:#0ca30c; --bad-ink:#e66767;
   --sc-birdie:#2a78d6; --sc-par:#18913f; --sc-bogey:#cc5a1f; --sc-double:#cf3629;
   --seq1:#184f95; --seq2:#256abf; --seq3:#2a78d6; --seq4:#3987e5; --seq5:#6da7ec; --seq6:#9ec5f4;
   --on-mark:#000000;
@@ -241,6 +241,18 @@ svg{display:block;width:100%;overflow:visible}
 svg text{font:11px system-ui,-apple-system,"Segoe UI",sans-serif;fill:var(--muted)}
 svg text.val{fill:var(--ink-2);font-weight:650;font-variant-numeric:tabular-nums}
 svg text.val.on{fill:var(--on-mark)}
+/* the hole must add up: shots + penalties = score. Never colour alone — the glyph
+   and the words carry it, the colour only makes it findable. */
+.recon{margin-top:12px;padding:9px 11px;border-radius:9px;background:var(--surface-2);
+  font-size:12.5px;font-weight:600;text-align:center;color:var(--ink-2);
+  font-variant-numeric:tabular-nums;line-height:1.45}
+.recon.ok{color:var(--good-ink)}
+.recon.bad{color:var(--bad-ink)}
+.penrow{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:12px}
+.penrow .lb{font-size:12.5px;color:var(--ink-2);font-weight:600}
+.penrow .pv{min-width:26px;text-align:center;font-weight:750;font-variant-numeric:tabular-nums}
+.badge-inc{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:999px;
+  background:var(--surface-2);color:var(--bad-ink);letter-spacing:.02em;margin-left:6px}
 svg text.lab{fill:var(--ink-2)}
 svg .gl{stroke:var(--grid);stroke-width:1}
 svg .ax{stroke:var(--axis);stroke-width:1}
@@ -360,6 +372,39 @@ const SG_LIES = ['Fairway','Light rough','Heavy rough','Sand','Hardpan','Fringe'
 const APP_STRIKE = ['Flush','Fat','Thin','Toe','Heel'];
 const SG_STRIKE  = ['Flush','Fat','Thin','Toe','Heel','Bladed'];
 
+/* Every full swing after the tee shot lives in one ordered array, h.app[], with the
+   state saying what the shot was for. One array rather than two is what makes the hole
+   reconcile: shots + penalties must equal the score, and that is only checkable if the
+   sequence is complete and in order. The buckets are still separate — they are separated
+   by `state` now instead of by living in a different array. */
+const APP_STATES = [
+  {k:'gir',      label:'Green',    sub:'Found the putting surface', cls:'ok'},
+  {k:'miss',     label:'Missed',   sub:'Went at it, missed',        cls:'bad'},
+  {k:'layup',    label:'Layup',    sub:'Deliberately short'},
+  {k:'recovery', label:'Recovery', sub:'Green was never the target', cls:'mid'}
+];
+const AT_GREEN  = st => st==='gir' || st==='miss';
+const SG_CLUBS  = CLUBS.concat(['Putter']);
+const SG_TYPES  = [
+  {k:'chip',       label:'Chip'},
+  {k:'pitch',      label:'Pitch'},
+  {k:'bunker',     label:'Bunker'},
+  {k:'full wedge', label:'Full wedge'},
+  {k:'putt',       label:'Putt'}
+];
+/* Greenside is what an up-and-down actually means. A 105-yard gap wedge is a full swing
+   that happens to be logged here, and folding it in was inflating the denominator. */
+const GREENSIDE = ['chip','pitch','bunker','putt'];
+/* Suggested only — every one of these is editable on the shot. */
+function sgTypeFor(s){
+  if (s.club === 'Putter') return 'putt';
+  if (s.lie === 'Sand')    return 'bunker';
+  if (s.dist == null)      return null;
+  if (s.dist > 40)         return 'full wedge';
+  if (s.dist >= 15)        return 'pitch';
+  return 'chip';
+}
+
 /* Full swings that are neither the tee shot nor a shot at the green: par-5 seconds,
    layups, and punch-outs. Kept in their own bucket — a sideways recovery is not an
    approach, and folding it into approach stats would hide both. */
@@ -382,6 +427,8 @@ const ZONES = [
   {k:'ML',label:'Left'},          {k:'GIR',label:'⛳'},    {k:'MR',label:'Right'},
   {k:'SL',label:'Short<br>left'}, {k:'S', label:'Short'}, {k:'SR',label:'Short<br>right'}
 ];
+
+const zoneWord = k => ((ZONES.find(z=>z.k===k)||{}).label || '').replace('<br>',' ').toLowerCase();
 
 const MENTAL = ['Too aggressive strategy','Mis-calculation','Fear','Club selection',
   'Distracted','Loss of cue-focus','Mis-judged conditions','No commitment to decision'];
@@ -497,29 +544,85 @@ function saveNow(){
 }
 
 /* ---------- model ---------- */
+const newTee = () => ({club:'Driver', outcome:null, dir:null, offline:null,
+                      dist:null, distOff:null, strike:[]});
+const newApp = o => Object.assign({state:null, kind:null, dist:null, club:'', lie:null,
+                      strike:[], result:null, remYds:null, zone:null, prox:null}, o||{});
+
 function newHole(i, par){
+  const p = par || DEFAULT_PARS[i] || 4;
   return {
-    n:i+1, par: par || DEFAULT_PARS[i] || 4, score:null,
-    tee:  {club:'Driver', outcome:null, dir:null, offline:null, dist:null, distOff:null, strike:[]},
-    extra:[],
-    app:  {state:null, dist:null, club:'', lie:null, zone:null, prox:null, strike:[]},
-    short:[], putts:[], mental:{tee:[], app:[], putt:[], general:[]}, note:''
+    n:i+1, par:p, score:null, penalties:0,
+    /* On a par 3 the tee shot IS the shot at the green, so it is logged once, in app[].
+       There is no tee block at all — an empty one was quietly putting a phantom driver
+       on every par 3. */
+    tee: p===3 ? null : newTee(),
+    app:[], short:[], putts:[], mental:{tee:[], app:[], putt:[], general:[]}, note:''
   };
+}
+/* par is editable mid-round, so the tee block has to appear and disappear with it */
+function syncTee(h){
+  if (h.par===3) h.tee = null;
+  else if (!h.tee) h.tee = newTee();
 }
 
 /* ---------- schema migration ----------
    Runs once at load. Never drops anything: tags logged before the phase split are
    parked under `general` and still counted, because we cannot know which phase they
    belonged to. */
-const SCHEMA = 4;
+const SCHEMA = 5;
+
+/* Two verified corrections from the 23 Aug reconciliation pass. Matched on the wrong
+   value as well as the round, so a hand-fix is never clobbered and re-running is safe. */
+const DATA_FIXES = [
+  {date:'2026-08-08', course:'Steele Canyon', field:'rating', from:71.9, to:71.4},
+  {date:'2026-08-22', course:'Maderas',       field:'slope',  from:136,  to:138}
+];
+
 function migrate(){
   if (DB.schema === SCHEMA) return;
   let touched = 0;
-  DB.rounds.forEach(r => (r.holes||[]).forEach(h => {
+  DB.rounds.forEach(r => {
+   let gaps = 0;
+   (r.holes||[]).forEach(h => {
     /* v3 → v4: layup / advance / recovery shots. Older rounds get an empty list rather
        than an invented one — those shots were played but never recorded, so they stay
        out of every extra-shot ratio instead of being guessed at. */
-    if (!Array.isArray(h.extra)) h.extra = [];
+    if (!Array.isArray(h.extra) && !Array.isArray(h.app)) h.extra = [];
+
+    /* v4 → v5: the single approach object and the separate extra[] array become one
+       ordered app[]. Nothing is back-filled — the shots that were never captured cannot
+       be inferred, which is exactly why the round gets flagged incomplete below. */
+    if (!Array.isArray(h.app)){
+      const a  = h.app || {};
+      const xs = (h.extra||[]).map(x => newApp({
+        state: x.kind==='recovery' ? 'recovery' : 'layup',
+        kind:  x.kind || null,            /* 'advance' has no state of its own; keep the word */
+        dist:  x.dist ?? null, club: x.club || '', lie: x.lie || null,
+        strike: Array.isArray(x.strike) ? x.strike : [],
+        result: x.result || null, remYds: x.remYds ?? null
+      }));
+      const at = AT_GREEN(a.state) ? [newApp({
+        state: a.state, dist: a.dist ?? null, club: a.club || '', lie: a.lie || null,
+        strike: Array.isArray(a.strike) ? a.strike : [],
+        zone: a.zone || null, prox: a.prox ?? null
+      })] : [];
+      /* on a par 3 the shot at the green came first — it was the tee shot */
+      h.app = h.par===3 ? at.concat(xs) : xs.concat(at);
+      delete h.extra;
+    }
+    if (typeof h.penalties !== 'number') h.penalties = 0;
+    syncTee(h);
+    (h.short||[]).forEach(sg => {
+      /* club was never captured, so it stays empty. type is only ever DERIVED from
+         fields that were recorded (lie, yards) — a shot from the fringe is not assumed
+         to have been a putt, because nothing in the file says which club was used. */
+      if (sg.club === undefined) sg.club = '';
+      if (sg.type === undefined) sg.type = sgTypeFor(sg);
+      if (sg.fromOffGreen === undefined) sg.fromOffGreen = false;
+      if (!Array.isArray(sg.miss)) sg.miss = [];
+    });
+    if (h.score != null && holeShots(h) + (h.penalties||0) !== h.score) gaps++;
     if (h.tee){
       if (h.tee.dir === 'straight') h.tee.dir = 'F';       /* old "straight" meant not offline */
       if (h.tee.dist === undefined)    h.tee.dist = null;
@@ -538,6 +641,15 @@ function migrate(){
     } else {
       MENTAL_KEYS.forEach(k => { if (!Array.isArray(h.mental[k])) h.mental[k] = []; });
     }
+   });
+   /* A round whose holes do not reconcile has shots that were never written down.
+      It is kept and still counted for everything it can answer, but any statistic that
+      needs the full shot chain leaves it out rather than computing a wrong number. */
+   if (r.incomplete === undefined) r.incomplete = gaps > 0;
+   r.gapHoles = gaps;
+  });
+  DB.rounds.forEach(r => DATA_FIXES.forEach(f => {
+    if (r.date===f.date && r.course===f.course && r[f.field]===f.from) r[f.field] = f.to;
   }));
   DB.schema = SCHEMA;
   saveNow();
@@ -573,9 +685,88 @@ function scoreLabel(rel){
   return {'-2':'Eagle','-1':'Birdie','0':'Par','1':'Bogey','2':'Double','3':'Triple'}[String(rel)] || plus(rel);
 }
 
+/* ---------- derived from the shot chain — none of this is stored ---------- */
+
+/* Every stroke that was a swing at the ball. Penalties are counted separately because
+   they are strokes without a shot. */
+function holeShots(h){
+  return ((h.tee && h.tee.outcome) ? 1 : 0)
+       + (Array.isArray(h.app) ? h.app.length : 0)
+       + (h.short ? h.short.length : 0)
+       + (h.putts ? h.putts.length : 0);
+}
+
+/* Strokes taken to get the ball onto the putting surface, penalties included.
+   null means the file never records it getting there. */
+function strokesToGreen(h){
+  let n = (h.tee && h.tee.outcome) ? 1 : 0;
+  const pen = h.penalties || 0;
+  for (const a of (h.app||[])){ n++; if (a.state==='gir') return n + pen; }
+  for (const sg of (h.short||[])){ n++; if (sg.onGreen === true) return n + pen; }
+  return null;
+}
+
+/* Green in regulation is a fact about the chain, not a flag someone ticked: on the
+   surface in par − 2. Rounds logged before the chain existed cannot be recomputed —
+   their shots are missing — so those fall back to what was actually flagged at the time
+   rather than pretending the derivation is possible. */
+function girOf(h, incomplete){
+  if (incomplete){
+    const at = (h.app||[]).filter(a => AT_GREEN(a.state));
+    return at.length ? at[at.length-1].state === 'gir' : null;
+  }
+  const st = strokesToGreen(h);
+  return st == null ? null : st <= h.par - 2;
+}
+
+const NUMWORD = ['no','one','two','three','four','five','six'];
+/* shots + penalties must equal the score. When it doesn't, something was not written
+   down, and saying so at the hole is the only time it can still be fixed from memory. */
+function recon(h){
+  const shots = holeShots(h), pen = h.penalties||0, tot = shots + pen;
+  if (h.score == null) return {shots, pen, tot, state:'none'};
+  const diff = tot - h.score;
+  return {shots, pen, tot, diff, state: diff===0 ? 'ok' : 'bad',
+    msg: diff===0 ? '' : (diff<0
+      ? (NUMWORD[Math.min(-diff,6)] || (-diff)) + ' shot' + (diff===-1?'':'s') + ' missing'
+      : (NUMWORD[Math.min(diff,6)]  || diff)    + ' shot' + (diff===1?'':'s') + ' too many')};
+}
+
+function reconLine(h){
+  const c = recon(h);
+  if (c.state === 'none')
+    return '<div class="recon">shots ' + c.shots + ' + penalties ' + c.pen + ' = ' + c.tot
+         + ' \u2014 no score yet</div>';
+  const body = 'shots ' + c.shots + ' + penalties ' + c.pen
+    + (c.state==='ok' ? ' = score ' : ' \u2260 score ') + h.score;
+  return '<div class="recon ' + c.state + '">' + body
+    + (c.state==='ok' ? ' \u2713' : ' \u26a0 ' + c.msg) + '</div>';
+}
+
+/* the same check across the whole round — how many holes fail to add up */
+function roundRecon(r){
+  let holes=0, gaps=0, shots=0, pen=0, strokes=0;
+  (r.holes||[]).forEach(h=>{
+    if (h.score==null) return;
+    holes++; shots += holeShots(h); pen += (h.penalties||0); strokes += h.score;
+    if (holeShots(h) + (h.penalties||0) !== h.score) gaps++;
+  });
+  return {holes, gaps, shots, pen, strokes};
+}
+function roundReconLine(r){
+  const c = roundRecon(r);
+  if (!c.holes) return '';
+  const ok = c.gaps === 0;
+  return '<div class="recon ' + (ok?'ok':'bad') + '">'
+    + 'shots ' + c.shots + ' + penalties ' + c.pen + (ok ? ' = ' : ' \u2260 ') + 'score ' + c.strokes
+    + (ok ? ' \u2713 every hole adds up'
+          : ' \u26a0 ' + c.gaps + ' of ' + c.holes + ' hole' + (c.gaps===1?'':'s') + ' do not add up')
+    + '</div>';
+}
+
 function holeTouched(h){
-  return h.score!=null || h.tee.outcome || h.tee.dir || h.app.state
-      || h.putts.length || h.short.length || (h.extra && h.extra.length) || mentalCount(h) > 0;
+  return h.score!=null || (h.tee && (h.tee.outcome || h.tee.dir)) || (h.app && h.app.length)
+      || h.putts.length || h.short.length || (h.penalties||0) > 0 || mentalCount(h) > 0;
 }
 function roundTotal(r){
   const s = r.holes.filter(h=>h.score!=null);
@@ -776,7 +967,7 @@ function startScreen(){
       const rel = t ? t.strokes - t.par : null;
       return '<div class="roundrow" data-act="open" data-v="'+rr.id+'">'
         + '<div class="sc">'+(t?t.strokes:'—')+'</div>'
-        + '<div class="m"><b>'+esc(rr.course||'Round')+'</b><span>'+esc(rr.date)
+        + '<div class="m"><b>'+esc(rr.course||'Round')+(rr.incomplete?'<span class="badge-inc">gaps</span>':'')+'</b><span>'+esc(rr.date)
         + (t ? ' · ' + (rel===0?'E':plus(rel)) + ' · ' + t.n + ' holes' : ' · not started')
         + (rr.finished?'':' · in progress') + '</span></div>'
         + '<div class="del" data-act="del-round" data-v="'+rr.id+'">🗑</div></div>';
@@ -821,7 +1012,14 @@ function holeScreen(r){
     + '<span class="rel">'+h.putts.length+' putt'+(h.putts.length===1?'':'s')+'</span>'
     + '</div>'
     + '<div class="row" style="margin-top:12px"><span class="lbl">Par</span>'+segRow('par',[3,4,5],h.par)+'</div>'
-    + '<div class="row"><button class="btn ghost full" data-act="quickpar">Quick par — good tee shot, green in reg, 2 putts</button></div>'
+    /* A penalty is a stroke without a shot. It was only ever recorded as a tee-shot
+       outcome, which described the swing but never reached the scorecard arithmetic. */
+    + '<div class="penrow"><span class="lb">Penalty strokes</span>'
+    + '<button class="step" data-act="pen" data-v="-1">−</button>'
+    + '<span class="pv">'+(h.penalties||0)+'</span>'
+    + '<button class="step" data-act="pen" data-v="1">+</button></div>'
+    + reconLine(h)
+    + '<div class="row" style="margin-top:12px"><button class="btn ghost full" data-act="quickpar">Quick par — good tee shot, green in reg, 2 putts</button></div>'
     + '</div></div>';
 
   /* tee shot (par 4/5 only) */
@@ -846,65 +1044,43 @@ function holeScreen(r){
     out += card('tee','Tee shot',badge,b);
   }
 
-  /* layup / advance / recovery — the full swings between the tee and the shot at the
-     green. Par-5 seconds live here, and so does every punch-out. */
-  let xb = h.extra.length ? h.extra.map((s,i)=>{
-    const kind = (EXTRA_KIND.find(k=>k.k===s.kind)||{}).label || 'Shot';
-    const res  = (EXTRA_OUT.find(o=>o.k===s.result)||{}).label || 'result not logged';
+  /* Every full swing after the tee shot, in the order it was played: layups, punch-outs
+     and the shot at the green all in one list. They used to live in two places, and a
+     layup had nowhere to go at all on a par 4, which is how holes stopped adding up. */
+  const shotLine = (a,i) => {
+    const st = APP_STATES.find(x=>x.k===a.state) || {};
+    const kind = a.kind==='advance' ? 'Advance' : (st.label || 'Shot');
+    const res = AT_GREEN(a.state)
+      ? (a.state==='gir'
+          ? '<span class="holed">on the green</span>' + (a.prox!=null ? ', ' + a.prox + ' ft' : '')
+          : 'missed' + (a.zone ? ' ' + zoneWord(a.zone) : '') + (a.prox!=null ? ', ' + a.prox + ' yds out' : ''))
+      : ((EXTRA_OUT.find(o=>o.k===a.result)||{}).label || 'result not logged')
+        + (a.remYds!=null ? ', ' + a.remYds + ' yds left' : '');
     return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
-      + '<b>'+esc(kind)+(s.dist!=null?' · '+s.dist+'y out':'')+(s.club?' · '+esc(s.club):'')+'</b>'
-      + '<em>'+esc(res)+(s.remYds!=null?', '+s.remYds+' yds left':'')
-      + (s.strike && s.strike.length ? ' · '+esc(s.strike.join(', ')) : '')+'</em></div>'
-      + '<button class="del" data-act="edit-extra" data-v="'+i+'">✎</button>'
-      + '<button class="del" data-act="del-extra" data-v="'+i+'">🗑</button></div>';
-  }).join('') : '';
-  xb += '<button class="btn ghost full" data-act="add-extra">+ Add layup, advance or recovery</button>';
-  /* the yards left is the start of the approach — hand it over rather than retype it */
-  const lastX = h.extra[h.extra.length-1];
-  if (lastX && lastX.remYds!=null && h.app.dist==null && (h.app.state==='gir'||h.app.state==='miss'))
-    xb += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-app">'
-        + 'Use ' + lastX.remYds + ' yds as the approach →</button></div>';
-  const extraCard = card('extra','Layup, advance &amp; recovery',
-    h.extra.length ? h.extra.length+'' : '', xb);
-  if (!isP3) out += extraCard;
+      + '<b>'+esc(kind)+(a.dist!=null?' · '+a.dist+'y out':'')+(a.club?' · '+esc(a.club):'')+'</b>'
+      + '<em>'+res+(a.strike && a.strike.length ? ' · '+esc(a.strike.join(', ')) : '')+'</em></div>'
+      + '<button class="del" data-act="edit-app" data-v="'+i+'">✎</button>'
+      + '<button class="del" data-act="del-app" data-v="'+i+'">🗑</button></div>';
+  };
+  let ab = h.app.map(shotLine).join('');
+  ab += '<button class="btn ghost full" data-act="add-app">+ Add '
+      + (h.app.length ? 'another shot' : (isP3 ? 'the tee shot' : 'a shot')) + '</button>';
 
-  /* approach */
-  const appBadge = h.app.state==='gir' ? '✓ green' : h.app.state==='miss' ? 'missed' : h.app.state==='na' ? 'n/a' : '';
-  let ab = '<div class="row"><span class="lbl">'+(isP3?'Tee shot to the green':'Shot at the green')+'</span>'
-    + segRow('app-state',[
-        {k:'gir',label:'Green',   sub:'in regulation', cls:'ok'},
-        {k:'miss',label:'Missed', sub:'short of green', cls:'bad'},
-        {k:'na', label:'No shot', sub:'laid up / after penalty'}
-      ], h.app.state)+'</div>';
+  const lastA = h.app[h.app.length-1];
+  /* the yards left IS the next shot's distance — hand it over rather than retype it */
+  if (lastA && !AT_GREEN(lastA.state) && lastA.remYds!=null)
+    ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-app" data-v="'+lastA.remYds+'">'
+        + 'Next shot from ' + lastA.remYds + ' yds →</button></div>';
+  if (lastA && lastA.state==='gir' && lastA.prox!=null && !h.putts.length)
+    ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-putt" data-v="'+lastA.prox+'">'
+        + 'Log putt 1 from ' + lastA.prox + ' ft →</button></div>';
+  if (lastA && lastA.state==='miss' && lastA.prox!=null && !h.short.length)
+    ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-short" data-v="'+lastA.prox+'">'
+        + 'Log the short-game shot from ' + lastA.prox + ' yds →</button></div>';
 
-  if (h.app.state==='gir' || h.app.state==='miss'){
-    ab += '<hr class="sep"><div class="row">'
-      + '<div class="fld" style="width:104px"><label>Yards in</label><input type="number" inputmode="numeric" data-act="app-dist" value="'+(h.app.dist??'')+'" placeholder="150"></div>'
-      + '<div class="fld grow"><label>Club</label>'+selectEl('app-club',CLUBS,h.app.club,'—')+'</div></div>'
-      + '<div class="row"><span class="lbl">Lie</span>'+segRow('app-lie',isP3?['Tee']:LIES.slice(1),h.app.lie)+'</div>';
-
-    if (h.app.state==='miss'){
-      ab += '<div class="row"><span class="lbl">Where did it end up?</span></div><div class="missgrid">'
-        + ZONES.map(z=>'<button data-act="app-zone" data-v="'+z.k+'" class="'
-          + (z.k==='GIR'?'centre ':'') + (h.app.zone===z.k?'on':'')+'">'+z.label+'</button>').join('')
-        + '</div>';
-    }
-    ab += '<div class="row" style="margin-top:12px">'
-      + '<div class="fld" style="width:120px"><label>'+(h.app.state==='gir'?'Feet from pin':'Yards from pin')+'</label>'
-      + '<input type="number" inputmode="numeric" data-act="app-prox" value="'+(h.app.prox??'')+'" placeholder="'+(h.app.state==='gir'?'22':'12')+'"></div></div>'
-      + '<div class="row"><span class="lbl">Strike</span>'+segRow('app-strike',APP_STRIKE,h.app.strike)+'</div>';
-
-    /* carry the proximity straight into the next shot rather than retyping it */
-    if (h.app.state==='gir' && h.app.prox!=null && !h.putts.length)
-      ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-putt">'
-          + 'Log putt 1 from ' + h.app.prox + ' ft →</button></div>';
-    if (h.app.state==='miss' && h.app.prox!=null && !h.short.length)
-      ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-short">'
-          + 'Log the short-game shot from ' + h.app.prox + ' yds →</button></div>';
-  }
-  out += card('app','Approach',appBadge,ab);
-  /* on a par 3 the tee shot IS the approach, so any recovery comes after it */
-  if (isP3) out += extraCard;
+  const green = h.app.filter(a=>AT_GREEN(a.state)).slice(-1)[0];
+  const appBadge = green ? (green.state==='gir' ? '\u2713 green' : 'missed') : (h.app.length ? h.app.length+'' : '');
+  out += card('app', isP3 ? 'Tee shot &amp; approach' : 'Approach, layups &amp; recovery', appBadge, ab);
 
   /* short game */
   let sb = h.short.length ? h.short.map((s,i)=>{
@@ -913,9 +1089,12 @@ function holeScreen(r){
       : s.onGreen === false
         ? 'missed again' + (s.remYds!=null ? ', ' + s.remYds + ' yds left' : '')
       : (s.prox!=null ? 'to ' + s.prox + ' ft' : 'result not logged');
+    const ty = (SG_TYPES.find(t=>t.k===s.type)||{}).label;
     return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
-      + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')+'</b>'
-      + '<em>'+res+(s.strike && s.strike.length ? ' · '+s.strike.join(', ') : '')+'</em></div>'
+      + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')
+      + (ty?' · '+esc(ty):'')+(s.club?' · '+esc(s.club):'')+'</b>'
+      + '<em>'+res+(s.strike && s.strike.length ? ' · '+esc(s.strike.join(', ')) : '')
+      + (s.miss && s.miss.length ? ' · '+esc(s.miss.join(', ').toLowerCase()) : '')+'</em></div>'
       + '<button class="del" data-act="edit-short" data-v="'+i+'">✎</button>'
       + '<button class="del" data-act="del-short" data-v="'+i+'">🗑</button></div>';
   }).join('') : '';
@@ -1012,7 +1191,8 @@ function drawPuttSheet(){
 function shortSheet(idx, preset){
   const h = H();
   tmp = idx==null
-    ? {dist:(preset==null?null:preset), lie:null, strike:[], onGreen:null, prox:null, remYds:null}
+    ? {dist:(preset==null?null:preset), club:'', type:null, lie:null, strike:[], miss:[],
+       onGreen:null, prox:null, remYds:null, fromOffGreen:false}
     : JSON.parse(JSON.stringify(h.short[idx]));
   tmp._i = idx;
   tmp._n = (idx==null ? h.short.length : idx) + 1;
@@ -1021,17 +1201,28 @@ function shortSheet(idx, preset){
 }
 function drawShortSheet(){
   const s = tmp;
+  /* type follows the club, lie and distance until it is set by hand — once it is, it stays */
+  const ty = s.type || sgTypeFor(s);
+  const isPutt = ty === 'putt' || s.club === 'Putter';
   let b = (s._chained ? '<div class="note" style="margin:0 0 10px">Distance carried over from the shot before — change it if you paced it differently.</div>' : '')
-    + '<div class="row"><div class="fld" style="width:130px"><label>Yards to pin</label>'
-    + '<input type="number" inputmode="numeric" data-sact="sgdist" value="'+(s.dist??'')+'" placeholder="25"></div></div>'
+    + '<div class="row"><div class="fld" style="width:118px"><label>Yards to pin</label>'
+    + '<input type="number" inputmode="numeric" data-sact="sgdist" value="'+(s.dist??'')+'" placeholder="25"></div>'
+    + '<div class="fld grow"><label>Club</label>'+selectEl('sgClub',SG_CLUBS,s.club,'—','sact')+'</div></div>'
+    + '<div class="row"><span class="lbl">Shot</span>'+segRow('sgType',SG_TYPES,ty,'sact')+'</div>'
     + '<div class="row"><span class="lbl">Lie</span>'+segRow('sgLie',SG_LIES,s.lie,'sact')+'</div>'
-    + '<div class="row"><span class="lbl">Strike</span>'+segRow('sgStrike',SG_STRIKE,s.strike,'sact')+'</div>'
+    /* A putt from the fringe is a putt. Asking whether it was flush, fat or thin is a
+       question about a wedge, and the answers it produced ("Bladed") meant nothing. */
+    + (isPutt
+        ? '<div class="row"><span class="lbl">If it missed, why</span>'+segRow('sgMiss',PUTT_MISS,s.miss,'sact')+'</div>'
+          + '<div class="note" style="margin:2px 0 0">Logged as a putt — it joins your lag and make-rate numbers as well as up-and-down.</div>'
+        : '<div class="row"><span class="lbl">Strike</span>'+segRow('sgStrike',SG_STRIKE,s.strike,'sact')+'</div>')
     + '<hr class="sep">'
     + '<div class="row"><span class="lbl">Where it finished</span>'
     + segRow('sgOn',[{k:'yes',label:'On the green',cls:'ok'},{k:'no',label:'Missed again',cls:'bad'}],
         s.onGreen===true?'yes':s.onGreen===false?'no':null,'sact')+'</div>';
   if (s.onGreen === true)
-    b += '<div class="row"><div class="fld" style="width:150px"><label>Feet from pin</label>'
+    b += '<div class="row"><div class="fld" style="width:150px"><label>'
+      + (isPutt ? 'Feet left (0 if holed)' : 'Feet from pin') + '</label>'
       + '<input type="number" inputmode="numeric" data-sact="sgprox" value="'+(s.prox??'')+'" placeholder="8"></div></div>';
   if (s.onGreen === false)
     b += '<div class="row"><div class="fld" style="width:150px"><label>Yards from pin</label>'
@@ -1041,33 +1232,51 @@ function drawShortSheet(){
   openSheet((tmp._i==null ? 'Short-game shot ' : 'Edit short-game shot ') + tmp._n, b);
 }
 
-/* ---------- layup / advance / recovery sheet ---------- */
-function extraSheet(idx, preset){
+/* ---------- shot sheet: layup, recovery, or the shot at the green ---------- */
+function appSheet(idx, preset){
   const h = H();
   tmp = idx==null
-    ? {kind:null, dist:(preset==null?null:preset), club:'', lie:null, strike:[], result:null, remYds:null}
-    : JSON.parse(JSON.stringify(h.extra[idx]));
+    ? newApp({dist: preset==null ? null : preset, lie: (h.par===3 && !h.app.length) ? 'Tee' : null})
+    : JSON.parse(JSON.stringify(h.app[idx]));
   tmp._i = idx;
-  tmp._n = (idx==null ? h.extra.length : idx) + 1;
+  tmp._n = (idx==null ? h.app.length : idx) + 1;
   tmp._chained = idx==null && preset!=null;
-  drawExtraSheet();
+  drawAppSheet();
 }
-function drawExtraSheet(){
-  const s = tmp;
+function drawAppSheet(){
+  const s = tmp, h = H();
+  const p3first = h.par===3 && (s._i===0 || (s._i==null && !h.app.length));
+  const atGreen = AT_GREEN(s.state);
   let b = (s._chained ? '<div class="note" style="margin:0 0 10px">Distance carried over from the shot before — change it if you paced it differently.</div>' : '')
-    + '<div class="row"><span class="lbl">What was it</span>'+segRow('xKind',EXTRA_KIND,s.kind,'sact')+'</div>'
-    + '<hr class="sep">'
-    + '<div class="row"><div class="fld" style="width:118px"><label>Yards to pin</label>'
-    + '<input type="number" inputmode="numeric" data-sact="xdist" value="'+(s.dist??'')+'" placeholder="240"></div>'
-    + '<div class="fld grow"><label>Club</label>'+selectEl('xClub',CLUBS,s.club,'—','sact')+'</div></div>'
-    + '<div class="row"><span class="lbl">Lie</span>'+segRow('xLie',EXTRA_LIES,s.lie,'sact')+'</div>'
-    + '<div class="row"><span class="lbl">Strike</span>'+segRow('xStrike',APP_STRIKE,s.strike,'sact')+'</div>'
-    + '<hr class="sep">'
-    + '<div class="row"><span class="lbl">How it came out</span>'+segRow('xOut',EXTRA_OUT,s.result,'sact')+'</div>'
-    + '<div class="row"><div class="fld" style="width:150px"><label>Yards left to pin</label>'
-    + '<input type="number" inputmode="numeric" data-sact="xrem" value="'+(s.remYds??'')+'" placeholder="150"></div></div>'
-    + '<div class="row" style="margin-top:16px">'
-    + '<button class="btn full" data-sact="xsave"'+(s.kind==null||s.result==null?' disabled':'')+'>Save shot</button></div>';
+    + (p3first ? '<div class="note" style="margin:0 0 10px">Par 3 — this is the tee shot and the shot at the green. It is logged once, here.</div>' : '')
+    + '<div class="row"><span class="lbl">What was this shot</span>'+segRow('aState',APP_STATES,s.state,'sact')+'</div>';
+  if (s.state){
+    b += '<hr class="sep">'
+      + '<div class="row"><div class="fld" style="width:118px"><label>Yards to pin</label>'
+      + '<input type="number" inputmode="numeric" data-sact="adist" value="'+(s.dist??'')+'" placeholder="'+(atGreen?'150':'240')+'"></div>'
+      + '<div class="fld grow"><label>Club</label>'+selectEl('aClub',CLUBS,s.club,'—','sact')+'</div></div>'
+      + '<div class="row"><span class="lbl">Lie</span>'
+      + segRow('aLie', p3first ? ['Tee'] : EXTRA_LIES, s.lie, 'sact')+'</div>'
+      + '<div class="row"><span class="lbl">Strike</span>'+segRow('aStrike',APP_STRIKE,s.strike,'sact')+'</div>'
+      + '<hr class="sep">';
+    if (atGreen){
+      if (s.state==='miss')
+        b += '<div class="row"><span class="lbl">Where did it end up?</span></div><div class="missgrid">'
+          + ZONES.map(z=>'<button data-sact="aZone" data-v="'+z.k+'" class="'
+            + (z.k==='GIR'?'centre ':'') + (s.zone===z.k?'on':'')+'">'+z.label+'</button>').join('')
+          + '</div>';
+      b += '<div class="row" style="margin-top:12px"><div class="fld" style="width:150px">'
+        + '<label>'+(s.state==='gir'?'Feet from pin':'Yards from pin')+'</label>'
+        + '<input type="number" inputmode="numeric" data-sact="aprox" value="'+(s.prox??'')+'" placeholder="'+(s.state==='gir'?'22':'12')+'"></div></div>';
+    } else {
+      b += '<div class="row"><span class="lbl">How it came out</span>'+segRow('aOut',EXTRA_OUT,s.result,'sact')+'</div>'
+        + '<div class="row"><div class="fld" style="width:150px"><label>Yards left to pin</label>'
+        + '<input type="number" inputmode="numeric" data-sact="arem" value="'+(s.remYds??'')+'" placeholder="150"></div></div>';
+    }
+  }
+  const ready = s.state != null && (atGreen || s.result != null);
+  b += '<div class="row" style="margin-top:16px">'
+    + '<button class="btn full" data-sact="asave"'+(ready?'':' disabled')+'>Save shot</button></div>';
   openSheet((tmp._i==null ? 'Shot ' : 'Edit shot ') + tmp._n, b);
 }
 
@@ -1084,13 +1293,15 @@ function finishRound(){
     + tile('Score', t.strokes, (t.strokes-t.par===0?'E':plus(t.strokes-t.par)) + ' · ' + t.n + ' holes')
     + tile('Putts', totalPutts(r), s.threePutts + ' three-putt' + (s.threePutts===1?'':'s'))
     + tile('Drives in play', fmtPct(s.inPlayPct), s.teeLogged + ' tee shots')
-    + tile('Greens', fmtPct(s.girPct), s.girN + ' of ' + s.appN)
+    + tile('Greens', fmtPct(s.girPct), s.girN + ' of ' + s.girHoles)
     + (ch!=null ? tile('Net', t.strokes - ch,
         'course handicap ' + plus(ch) + (full ? ' · target ' + (totalPar(r) + ch) : '')) : '')
     + (diff!=null ? tile('Differential', r1(diff),
         diff <= (r.index ?? Infinity) ? 'better than your index — this one helps' : 'above your index',
         diff <= (r.index ?? Infinity) ? 'pos' : 'neg') : '')
     + '</div>'
+    + roundReconLine(r)
+    + (r.incomplete ? '<div class="note">This round was logged before every shot had a slot, so its chain has gaps. It still counts for everything it can answer; anything that needs the full sequence leaves it out rather than guessing.</div>' : '')
     + (ch!=null && !full ? '<div class="note">Score differential needs all 18 holes, so it appears once the round is complete.</div>' : '')
     + '<div class="row"><div class="fld grow"><label>Round notes</label>'
     + '<textarea data-sact="rnote" placeholder="What was the story of the round?">'+esc(r.notes||'')+'</textarea></div></div>'
@@ -1115,9 +1326,11 @@ function summarise(rounds){
     teeLogged:0, teeGood:0, teeBlocked:0, teeTrouble:0, teePenalty:0,
     teeDir:{L:0,F:0,R:0}, teeOff:{}, teeStrike:{}, teeDist:{short:0,ok:0,long:0}, teeDistOff:{},
     teeDirN:0, teeDistN:0, teeStrikeN:0,
-    appN:0, girN:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
+    appN:0, appGreen:0, girN:0, girHoles:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
     extraN:0, xKind:{}, xOut:{}, xLie:{}, xStrike:{}, xRem:[], xResultN:0, xBackInPlay:0, xPenalty:0,
-    shortN:0, sgLie:{}, sgStrike:{}, sgProx:[], sgOnGreen:0, sgResultN:0,
+    shortN:0, nearN:0, sgLie:{}, sgStrike:{}, sgProx:[], sgOnGreen:0, sgResultN:0,
+    sgType:{}, wedgeProx:[], offGreenPutts:0, penalties:0,
+    incomplete: rounds.filter(r=>r.incomplete).length,
     udAtt:0, udMade:0, scrAtt:0, scrMade:0,
     putts:0, threePutts:0, onePutts:0, sgPutt:0, sgPuttHoles:0,
     bucket:{}, breakMake:{}, puttMiss:{}, lagFrom:[], lagLeft:[],
@@ -1144,7 +1357,7 @@ function summarise(rounds){
       if (h.score!=null){ S.scored++; S.strokes+=h.score; S.parTotal+=h.par; rs.strokes+=h.score; rs.par+=h.par; rs.n++; }
 
       /* tee */
-      if (h.par!==3 && (h.tee.outcome || h.tee.dir)){
+      if (h.par!==3 && h.tee && (h.tee.outcome || h.tee.dir)){
         if (h.tee.outcome){
           S.teeLogged++; rs.teeN++;
           if (h.tee.outcome==='good'){ S.teeGood++; rs.inPlay++; }
@@ -1160,29 +1373,38 @@ function summarise(rounds){
         (h.tee.strike||[]).forEach(k=>S.teeStrike[k]=(S.teeStrike[k]||0)+1);
       }
 
-      /* approach */
-      if (h.app.state==='gir' || h.app.state==='miss'){
-        S.appN++; rs.girN++;
-        const band = appBand(h.app.dist);
+      /* approach — the shot that was actually aimed at the green */
+      const atGreen = h.app.filter(a => AT_GREEN(a.state));
+      const goShot  = atGreen[atGreen.length-1] || null;
+      if (goShot){
+        S.appN++;
+        if (goShot.state==='gir') S.appGreen++;
+        const band = appBand(goShot.dist);
         if (band){ S.appDistBand[band] = S.appDistBand[band] || {n:0,gir:0}; S.appDistBand[band].n++; }
-        if (h.app.state==='gir'){
-          S.girN++; rs.gir++;
+        if (goShot.state==='gir'){
           if (band) S.appDistBand[band].gir++;
-          if (h.app.prox!=null) S.appProx.push(h.app.prox);
-        } else if (h.app.zone){ S.zones[h.app.zone]=(S.zones[h.app.zone]||0)+1; }
-        (h.app.strike||[]).forEach(k=>S.appStrike[k]=(S.appStrike[k]||0)+1);
+          if (goShot.prox!=null) S.appProx.push(goShot.prox);
+        } else if (goShot.zone){ S.zones[goShot.zone]=(S.zones[goShot.zone]||0)+1; }
+        (goShot.strike||[]).forEach(k=>S.appStrike[k]=(S.appStrike[k]||0)+1);
       }
 
-      /* scrambling */
-      if (h.app.state==='miss' && h.score!=null){
+      /* Greens in regulation is derived from the chain, not read off a flag — except on
+         rounds logged before the chain existed, where the shots to derive it from are
+         missing and the old flag is the only honest answer. */
+      const gir = girOf(h, r.incomplete);
+      if (gir !== null){ S.girHoles++; rs.girN++; }
+      if (gir === true){ S.girN++; rs.gir++; }
+
+      /* scrambling — a green missed, and whether par was still made */
+      if (gir === false && h.score!=null){
         S.scrAtt++; if (h.score<=h.par) S.scrMade++;
       }
 
-      /* layup / advance / recovery — its own bucket, deliberately never folded into
-         the approach or GIR numbers */
-      (h.extra||[]).forEach(x=>{
+      /* layups and recoveries — their own bucket, never folded into approach or GIR */
+      h.app.filter(a => !AT_GREEN(a.state)).forEach(x=>{
         S.extraN++;
-        if (x.kind) S.xKind[x.kind] = (S.xKind[x.kind]||0)+1;
+        const kind = x.kind || x.state;
+        if (kind) S.xKind[kind] = (S.xKind[kind]||0)+1;
         if (x.result){
           S.xResultN++;
           S.xOut[x.result] = (S.xOut[x.result]||0)+1;
@@ -1194,16 +1416,41 @@ function summarise(rounds){
         if (x.remYds!=null) S.xRem.push(x.remYds);
       });
 
+      S.penalties += (h.penalties||0);
+
       /* short game */
-      h.short.forEach(s=>{
+      h.short.forEach(sg=>{
         S.shortN++;
-        if (s.onGreen != null){ S.sgResultN++; if (s.onGreen) S.sgOnGreen++; }
-        if (s.lie){ S.sgLie[s.lie]=S.sgLie[s.lie]||{n:0,prox:[]}; S.sgLie[s.lie].n++; if(s.prox!=null) S.sgLie[s.lie].prox.push(s.prox); }
-        (s.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
-        if (s.prox!=null) S.sgProx.push(s.prox);
+        const ty = sg.type || sgTypeFor(sg);
+        if (ty){ S.sgType[ty] = S.sgType[ty] || {n:0, on:0, prox:[]}; S.sgType[ty].n++;
+                 if (sg.onGreen) S.sgType[ty].on++;
+                 if (sg.prox!=null) S.sgType[ty].prox.push(sg.prox); }
+        /* a full wedge is a swing, not a scramble — it gets its own proximity number
+           instead of inflating the up-and-down denominator */
+        const near = GREENSIDE.indexOf(ty) > -1 || ty == null;
+        if (near){
+          S.nearN++;
+          if (sg.onGreen != null){ S.sgResultN++; if (sg.onGreen) S.sgOnGreen++; }
+          if (sg.prox!=null) S.sgProx.push(sg.prox);
+        } else if (sg.prox!=null) S.wedgeProx.push(sg.prox);
+        if (sg.lie){ S.sgLie[sg.lie]=S.sgLie[sg.lie]||{n:0,prox:[]}; S.sgLie[sg.lie].n++; if(sg.prox!=null) S.sgLie[sg.lie].prox.push(sg.prox); }
+        (sg.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
+        /* A putt from the fringe is the same skill as a putt on it. It stays a
+           short-game shot for up-and-down and also joins the putting numbers. */
+        if (sg.fromOffGreen && sg.dist!=null){
+          S.offGreenPutts++;
+          const ft = sg.dist * 3;                         /* yards to pin, in feet */
+          const bk = puttBucket(ft);
+          const holed = sg.onGreen === true && sg.prox === 0;
+          S.bucket[bk.k].n++; if (holed) S.bucket[bk.k].made++;
+          if (ft>=20){ S.lagFrom.push(ft); S.lagLeft.push(holed ? 0 : (sg.prox ?? null)); }
+          if (!holed) (sg.miss||[]).forEach(k=>S.puttMiss[k]=(S.puttMiss[k]||0)+1);
+        }
       });
-      if (h.app.state==='miss' && h.short.length){
-        S.udAtt++; if (h.short.length + h.putts.length <= 2) S.udMade++;
+      /* up and down: green missed, a greenside shot played, home in two from there */
+      const nearShots = h.short.filter(sg => GREENSIDE.indexOf(sg.type || sgTypeFor(sg)) > -1 || (sg.type||sgTypeFor(sg))==null);
+      if (gir === false && nearShots.length){
+        S.udAtt++; if (nearShots.length + h.putts.length <= 2) S.udMade++;
       }
 
       /* putting */
@@ -1242,7 +1489,7 @@ function summarise(rounds){
   S.shortPct   = pct(S.teeDist.short, S.teeDistN);
   S.longPct    = pct(S.teeDist.long,  S.teeDistN);
   S.middlePct  = pct(S.teeStrike['Middle']||0, S.teeStrikeN);
-  S.girPct    = pct(S.girN, S.appN);
+  S.girPct    = pct(S.girN, S.girHoles);
   S.scrPct    = pct(S.scrMade, S.scrAtt);
   S.udPct     = pct(S.udMade, S.udAtt);
   S.sgOnGreenPct = pct(S.sgOnGreen, S.sgResultN);
@@ -1487,6 +1734,12 @@ function renderStats(){
   let h = '<div class="row" style="margin-bottom:12px">'
     + chipRow('filter',[{k:'all',label:'All ('+all.length+')'},{k:'10',label:'Last 10'},{k:'5',label:'Last 5'}], ['all','10','5'].indexOf(statFilter)>-1?statFilter:null)
     + '</div>';
+  /* Say it once, at the top, rather than footnoting every number it touches. */
+  if (S.incomplete)
+    h += '<div class="recon bad" style="margin:0 0 12px">\u26a0 ' + S.incomplete + ' of ' + S.rounds
+       + ' round' + (S.rounds===1?'':'s') + ' here has gaps in the shot chain. Greens in regulation on '
+       + 'those rounds is read from what was flagged at the time, not derived, and anything needing the '
+       + 'full sequence leaves them out.</div>';
 
   /* headline tiles */
   const relPer = S.rounds ? (S.strokes - S.parTotal)/S.rounds : null;
@@ -1494,7 +1747,7 @@ function renderStats(){
     + tile('Scoring average', S.avgScore==null?'—':r1(S.avgScore), relPer==null?'':plus(r1(relPer))+' to par · '+S.rounds+' round'+(S.rounds===1?'':'s'))
     + tile('Drives in play', fmtPct(S.inPlayPct), 'Clear shot to green '+fmtPct(S.clearPct))
     + tile('Fairways hit', fmtPct(S.fairwayPct), S.teeDir.F+' of '+S.teeDirN+' drives')
-    + tile('Greens in reg', fmtPct(S.girPct), S.girN+' of '+S.appN+(S.avgProx?' · '+r1(S.avgProx)+' ft avg':''))
+    + tile('Greens in reg', fmtPct(S.girPct), S.girN+' of '+S.girHoles+(S.avgProx?' · '+r1(S.avgProx)+' ft avg':''))
     + tile('Putts per round', S.puttsPerRound==null?'—':r1(S.puttsPerRound), S.threePutts+' three-putt'+(S.threePutts===1?'':'s')+' · '+S.onePutts+' one-putt'+(S.onePutts===1?'':'s'))
     + tile('SG putting', S.sgPuttPerRound==null?'—':plus(r2(S.sgPuttPerRound)), 'per round vs tour baseline', S.sgPuttPerRound>=0?'pos':'neg')
     + tile('Scrambling', fmtPct(S.scrPct), S.scrMade+' of '+S.scrAtt+' missed greens saved')
@@ -1557,7 +1810,7 @@ function renderStats(){
   h += '<div class="card"><div class="hd"><h3>Approach play</h3></div><div class="bd">';
   if (S.appN){
     h += box('Where you miss greens',
-      'Darker means more misses. '+S.girN+' of '+S.appN+' approaches found the green ('+fmtPct(S.girPct)+').',
+      'Darker means more misses. '+S.appGreen+' of '+S.appN+' shots at the green found it. Greens in regulation \u2014 on the surface in par minus two, penalties counted \u2014 is '+fmtPct(S.girPct)+'.',
       heatGrid(S.zones),
       tableView(['Zone','Misses'], ZONES.filter(z=>z.k!=='GIR').map(z=>[z.label.replace('<br>',' '), S.zones[z.k]||0])));
 
@@ -1617,13 +1870,27 @@ function renderStats(){
 
   /* ---- short game ---- */
   const sgRows = Object.entries(S.sgLie).filter(([,v])=>v.n).map(([k,v])=>({k, v: v.prox.length?Math.round(avg(v.prox)):0, t:(v.prox.length?r1(avg(v.prox))+' ft':'—')+' ('+v.n+')'}));
+  /* declared order, so the row order is the shot ladder and never the order they arrived */
+  const sgTypeRows = SG_TYPES.map(ty => {
+    const d = S.sgType[ty.k];
+    if (!d || !d.n) return null;
+    return {k: ty.label, v: d.n,
+      t: d.n + ' shot' + (d.n===1?'':'s') + (d.prox.length ? ' \u00b7 ' + r1(avg(d.prox)) + ' ft avg' : '')};
+  }).filter(Boolean);
   if (S.shortN){
     h += '<div class="card"><div class="hd"><h3>Short game</h3></div><div class="bd">'
       + '<div class="tiles">'
-      + tile('Up &amp; down', fmtPct(S.udPct), S.udMade+' of '+S.udAtt+' attempts')
-      + tile('Avg proximity', S.sgProx.length?r1(avg(S.sgProx))+'<small> ft</small>':'—', S.shortN+' shots logged')
-      + (S.sgResultN ? tile('Found the green', fmtPct(S.sgOnGreenPct), S.sgOnGreen+' of '+S.sgResultN+' short-game shots') : '')
+      + tile('Up &amp; down', fmtPct(S.udPct), S.udMade+' of '+S.udAtt+' greenside attempts')
+      + tile('Avg proximity', S.sgProx.length?r1(avg(S.sgProx))+'<small> ft</small>':'—', S.nearN+' greenside shots')
+      + (S.sgResultN ? tile('Found the green', fmtPct(S.sgOnGreenPct), S.sgOnGreen+' of '+S.sgResultN+' greenside shots') : '')
+      + (S.wedgeProx.length ? tile('Full wedge proximity', r1(avg(S.wedgeProx))+'<small> ft</small>', S.wedgeProx.length+' shots over 40 yds') : '')
       + '</div>'
+      + (S.wedgeProx.length || S.offGreenPutts
+          ? '<div class="note" style="margin:0 0 12px">Up and down counts greenside shots only — chips, pitches, bunker shots and putts from the fringe. '
+            + 'A full wedge from 60 or 100 yards is a swing, not a scramble, so it has its own proximity number'
+            + (S.offGreenPutts ? '. ' + S.offGreenPutts + ' putt' + (S.offGreenPutts===1?'':'s') + ' played from off the surface also count in the putting numbers.' : '.')
+            + '</div>' : '')
+      + (sgTypeRows.length ? box('By shot type','Chips, pitches, bunker shots and full wedges are different skills; the average that mixes them tells you nothing.',hbar(sgTypeRows,{labelW:96,aria:'Short game by type'})) : '')
       + (sgRows.length ? box('Average proximity by lie','Shorter is better. This is the number that decides your up-and-down rate.',hbar(sgRows,{labelW:96,aria:'Short game proximity by lie'})) : '')
       + '</div></div>';
   }
@@ -1724,7 +1991,7 @@ let pDraft = { areas:[], qual:3, notes:'' };
    ================================================================ */
 function renderData(){
   const bytes = (localStorage.getItem(KEY)||'').length;
-  const shots = DB.rounds.reduce((a,r)=>a + r.holes.reduce((b,h)=>b + h.putts.length + h.short.length + (h.tee.outcome?1:0) + (h.app.state&&h.app.state!=='na'?1:0),0),0);
+  const shots = DB.rounds.reduce((a,r)=>a + r.holes.reduce((b,h)=>b + holeShots(h),0),0);
   const h = card('exp','Export','',
       '<div class="note" style="margin:0 0 12px">Synced across your devices, but a backup you hold is still worth keeping — export now and then.</div>'
     + '<div class="row"><button class="btn ghost grow" data-act="csv-shots">Shot CSV</button>'
@@ -1765,32 +2032,35 @@ function dl(name, text, type){
 const q = v => v==null ? '' : /[",\n]/.test(String(v)) ? '"'+String(v).replace(/"/g,'""')+'"' : String(v);
 
 function csvShots(){
-  const head = ['round_date','course','tees','hole','par','score','shot_type','club','outcome','direction','offline',
+  const head = ['round_date','course','tees','hole','par','score','penalties','shot_no','shot_type','club','outcome','direction','offline',
     'tee_distance','tee_distance_miss','strike','lie','yards_in','miss_zone','proximity',
-    'putt_distance_ft','break','slope','holed','left_ft','miss_reason','mental','note'];
+    'putt_distance_ft','break','slope','holed','left_ft','miss_reason','mental','note','round_incomplete'];
   const rows = [head.join(',')];
   const DIR = {L:'left', F:'fairway', R:'right'};
   DB.rounds.forEach(r=>r.holes.forEach(h=>{
     if (!holeTouched(h)) return;
-    const base = [r.date, r.course, r.tees, h.n, h.par, h.score];
+    const base = [r.date, r.course, r.tees, h.n, h.par, h.score, h.penalties||0];
     const m = h.mental || {};
-    if (h.tee.outcome || h.tee.dir) rows.push(base.concat(['tee', h.tee.club, h.tee.outcome,
+    const inc = r.incomplete ? 'yes' : 'no';
+    /* one row per shot, in the order played, so the file reconciles the same way the app does */
+    let no = 0;
+    const push = cols => rows.push(base.concat([++no]).concat(cols).concat([inc]).map(q).join(','));
+    if (h.tee && (h.tee.outcome || h.tee.dir)) push(['tee', h.tee.club, h.tee.outcome,
       DIR[h.tee.dir] || h.tee.dir, h.tee.offline, h.tee.dist, h.tee.distOff,
       (h.tee.strike||[]).join('|'), '', '', '', '', '', '', '', '', '', '',
-      (m.tee||[]).join('|'), h.note]).map(q).join(','));
-    if (h.app.state) rows.push(base.concat(['approach', h.app.club, h.app.state, '', '', '', '',
-      (h.app.strike||[]).join('|'), h.app.lie, h.app.dist, h.app.zone, h.app.prox, '', '', '', '', '', '',
-      (m.app||[]).join('|'), h.note]).map(q).join(','));
-    (h.extra||[]).forEach(x=>rows.push(base.concat(['extra_'+(x.kind||'shot'), x.club, x.result,
-      '', '', '', '', (x.strike||[]).join('|'), x.lie, x.dist, '', x.remYds,
-      '', '', '', '', '', '', '', '']).map(q).join(',')));
-    h.short.forEach(s=>rows.push(base.concat(['short_game', '',
-      s.onGreen===true?'on green':s.onGreen===false?'missed green':'', '', '', '', '',
-      (s.strike||[]).join('|'), s.lie, s.dist, '', s.onGreen===false ? s.remYds : s.prox,
-      '', '', '', '', '', '', '', '']).map(q).join(',')));
-    h.putts.forEach((p,i)=>rows.push(base.concat(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', '', '',
+      (m.tee||[]).join('|'), h.note]);
+    h.app.forEach(a => push([AT_GREEN(a.state) ? 'approach' : (a.kind || a.state),
+      a.club, AT_GREEN(a.state) ? a.state : a.result, '', '', '', '',
+      (a.strike||[]).join('|'), a.lie, a.dist, a.zone,
+      AT_GREEN(a.state) ? a.prox : a.remYds, '', '', '', '', '', '',
+      (m.app||[]).join('|'), h.note]));
+    h.short.forEach(sg => push(['short_' + ((sg.type || sgTypeFor(sg) || 'shot').replace(' ','_')), sg.club,
+      sg.onGreen===true?'on green':sg.onGreen===false?'missed green':'', '', '', '', '',
+      (sg.strike||[]).join('|'), sg.lie, sg.dist, '', sg.onGreen===false ? sg.remYds : sg.prox,
+      '', '', '', '', '', (sg.miss||[]).join('|'), '', '']));
+    h.putts.forEach((p,i) => push(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', '', '',
       'Green', '', '', '', p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'),
-      i===0 ? (m.putt||[]).join('|') : '', '']).map(q).join(',')));
+      i===0 ? (m.putt||[]).join('|') : '', '']));
   }));
   dl('shots.csv', rows.join('\n'));
 }
@@ -1900,23 +2170,28 @@ function action(a, v, node, ev){
     case 'prev': cur.hole = (cur.hole+17)%18; render(); return;
     case 'next': cur.hole = (cur.hole+1)%18;  render(); return;
     case 'jump': cur.hole = +v; render(); return;
-    case 'par':  h.par = +v; save(); render(); return;
+    case 'par':  h.par = +v; syncTee(h); save(); render(); return;
     case 'sc':     h.score = clamp((h.score==null ? h.par : h.score) + (+v), 1, 15); save(); render(); return;
     case 'sc-par': h.score = h.score===h.par ? null : h.par; save(); render(); return;
     case 'quickpar': {
       h.score = h.par;
       if (h.par!==3){
+        syncTee(h);
         h.tee.outcome = 'good';
         h.tee.dir = 'F';  h.tee.offline = null;
         h.tee.dist = 'ok'; h.tee.distOff = null;
         if (!h.tee.strike.length) h.tee.strike = ['Middle'];
       }
-      h.app.state = 'gir';
+      /* one shot at the green — and on a par 3 that one shot IS the tee shot */
+      if (!h.app.some(a=>AT_GREEN(a.state)))
+        h.app.push(newApp({state:'gir', lie: h.par===3 ? 'Tee' : 'Fairway'}));
       saveNow(); render();
       /* never invent putts — open the sheet and let the real ones be entered */
       if (!h.putts.length) puttSheet(null);
       return;
     }
+    case 'pen':
+      h.penalties = clamp((h.penalties||0) + (+v), 0, 9); save(); render(); return;
     case 'tee-out':    h.tee.outcome = h.tee.outcome===v ? null : v; save(); render(); return;
     case 'tee-dir': {
       h.tee.dir = h.tee.dir===v ? null : v;
@@ -1932,29 +2207,20 @@ function action(a, v, node, ev){
     case 'tee-distoff': h.tee.distOff = h.tee.distOff===v ? null : v; save(); render(); return;
     case 'tee-strike': toggleIn(h.tee.strike, v); save(); render(); return;
     case 'tee-club':   h.tee.club = v; save(); return;
-    case 'app-state':  h.app.state = h.app.state===v ? null : v; if (h.app.state==='gir') h.app.zone=null; if (h.par===3) h.app.lie='Tee'; save(); render(); return;
-    case 'app-lie':    h.app.lie = h.app.lie===v ? null : v; save(); render(); return;
-    case 'app-zone':   h.app.zone = h.app.zone===v ? null : v; save(); render(); return;
-    case 'app-strike': toggleIn(h.app.strike, v); save(); render(); return;
-    case 'app-club':   h.app.club = v; save(); return;
+    case 'add-app':    appSheet(null); return;
+    case 'edit-app':   appSheet(+v); return;
+    case 'del-app':    h.app.splice(+v,1); save(); render(); return;
+    case 'chain-app':  appSheet(null, +v); return;
     case 'mental-tab': mentalTab = v; render(); return;
     case 'mental':     toggleIn(h.mental[mentalTab], v); save(); render(); return;
     case 'add-putt':   puttSheet(null); return;
     case 'edit-putt':  puttSheet(+v); return;
     case 'del-putt':   h.putts.splice(+v,1); save(); render(); return;
-    case 'chain-putt':  puttSheet(null, h.app.prox); return;
-    case 'chain-short': shortSheet(null, h.app.prox); return;
+    case 'chain-putt':  puttSheet(null, +v); return;
+    case 'chain-short': shortSheet(null, +v); return;
     case 'add-short':  shortSheet(null); return;
     case 'edit-short': shortSheet(+v); return;
     case 'del-short':  h.short.splice(+v,1); save(); render(); return;
-    case 'add-extra':  extraSheet(null); return;
-    case 'edit-extra': extraSheet(+v); return;
-    case 'del-extra':  h.extra.splice(+v,1); save(); render(); return;
-    case 'chain-app': {
-      const last = h.extra[h.extra.length-1];
-      if (last && last.remYds!=null) h.app.dist = last.remYds;   /* carry the number, invent nothing else */
-      save(); render(); return;
-    }
     case 'finish':     finishRound(); return;
     case 'filter':     statFilter = v; renderStats(); return;
     case 'pArea':      toggleIn(pDraft.areas, v); renderPractice(); return;
@@ -2000,15 +2266,25 @@ function sheetAction(a, v, node, silent){
       return;
     }
     case 'sgdist':  tmp.dist = v===''?null:+v; syncSaveBtn(tmp.dist!=null); return;
+    case 'sgClub':  tmp.club = v; if (v==='Putter') tmp.type='putt'; else if (tmp.type==='putt') tmp.type=null; drawShortSheet(); return;
+    case 'sgType':  tmp.type = tmp.type===v?null:v; drawShortSheet(); return;
     case 'sgLie':   tmp.lie = tmp.lie===v?null:v; drawShortSheet(); return;
     case 'sgStrike':toggleIn(tmp.strike, v); drawShortSheet(); return;
+    case 'sgMiss':  toggleIn(tmp.miss, v); drawShortSheet(); return;
     case 'sgOn':    tmp.onGreen = v==='yes'; if (tmp.onGreen) tmp.remYds=null; else tmp.prox=null; drawShortSheet(); return;
     case 'sgprox':  tmp.prox = v===''?null:+v; return;
     case 'sgrem':   tmp.remYds = v===''?null:+v; return;
     case 'sgsave': {
       if (tmp.dist==null || tmp.onGreen==null) return;
-      const sg = {dist:tmp.dist, lie:tmp.lie, strike:tmp.strike.slice(),
-                  onGreen:tmp.onGreen, prox:tmp.prox, remYds:tmp.remYds};
+      const ty = tmp.type || sgTypeFor(tmp);
+      const putt = ty==='putt' || tmp.club==='Putter';
+      const sg = {dist:tmp.dist, club:tmp.club, type:ty, lie:tmp.lie,
+                  strike: putt ? [] : tmp.strike.slice(),
+                  miss:   putt ? tmp.miss.slice() : [],
+                  onGreen:tmp.onGreen, prox:tmp.prox, remYds:tmp.remYds,
+                  /* a putt played from off the putting surface — it counts as a short-game
+                     shot for up-and-down AND as a putt for lag and make rate */
+                  fromOffGreen: putt};
       const isNew = tmp._i==null;
       if (isNew) h.short.push(sg); else h.short[tmp._i]=sg;
       saveNow(); closeSheet(); render();
@@ -2019,23 +2295,34 @@ function sheetAction(a, v, node, silent){
       }
       return;
     }
-    case 'xKind':   tmp.kind = tmp.kind===v?null:v; drawExtraSheet(); return;
-    case 'xdist':   tmp.dist = v===''?null:+v; return;
-    case 'xClub':   tmp.club = v; return;
-    case 'xLie':    tmp.lie = tmp.lie===v?null:v; drawExtraSheet(); return;
-    case 'xStrike': toggleIn(tmp.strike, v); drawExtraSheet(); return;
-    case 'xOut':    tmp.result = tmp.result===v?null:v; drawExtraSheet(); return;
-    case 'xrem':    tmp.remYds = v===''?null:+v; return;
-    case 'xsave': {
-      if (tmp.kind==null || tmp.result==null) return;
-      const x = {kind:tmp.kind, dist:tmp.dist, club:tmp.club, lie:tmp.lie,
-                 strike:tmp.strike.slice(), result:tmp.result, remYds:tmp.remYds};
+    case 'aState':  {
+      tmp.state = tmp.state===v ? null : v;
+      if (tmp.state==='gir') tmp.zone = null;
+      if (AT_GREEN(tmp.state)) tmp.result = tmp.remYds = null; else tmp.zone = tmp.prox = null;
+      if (H().par===3 && (tmp._i===0 || (tmp._i==null && !H().app.length))) tmp.lie = 'Tee';
+      drawAppSheet(); return;
+    }
+    case 'adist':   tmp.dist = v===''?null:+v; return;
+    case 'aClub':   tmp.club = v; return;
+    case 'aLie':    tmp.lie = tmp.lie===v?null:v; drawAppSheet(); return;
+    case 'aStrike': toggleIn(tmp.strike, v); drawAppSheet(); return;
+    case 'aZone':   tmp.zone = tmp.zone===v?null:v; drawAppSheet(); return;
+    case 'aprox':   tmp.prox = v===''?null:+v; return;
+    case 'aOut':    tmp.result = tmp.result===v?null:v; drawAppSheet(); return;
+    case 'arem':    tmp.remYds = v===''?null:+v; return;
+    case 'asave': {
+      if (tmp.state==null) return;
+      if (!AT_GREEN(tmp.state) && tmp.result==null) return;
+      const a = newApp({state:tmp.state, kind:tmp.kind, dist:tmp.dist, club:tmp.club, lie:tmp.lie,
+                        strike:tmp.strike.slice(), result:tmp.result, remYds:tmp.remYds,
+                        zone:tmp.zone, prox:tmp.prox});
       const isNew = tmp._i==null;
-      if (isNew) h.extra.push(x); else h.extra[tmp._i]=x;
+      if (isNew) h.app.push(a); else h.app[tmp._i]=a;
       saveNow(); closeSheet(); render();
-      /* still stuck means another one is coming — walk straight into it. Anything else
-         hands off to the approach card by button, which never jumps under a thumb. */
-      if (isNew && x.result==='trouble' && x.remYds!=null && x.remYds>0) extraSheet(null, x.remYds);
+      /* keep walking the hole. Still stuck means another swing is coming; anything else
+         hands off by button so a sheet never jumps under a thumb mid-entry. */
+      if (isNew && a.state==='recovery' && a.result==='trouble' && a.remYds!=null && a.remYds>0)
+        appSheet(null, a.remYds);
       return;
     }
     case 'rnote':  { const r=R(); if(r){ r.notes = v; save(); } return; }
@@ -2044,7 +2331,7 @@ function sheetAction(a, v, node, silent){
   }
 }
 function syncSaveBtn(ok){
-  const b = document.querySelector('#sheetBody [data-sact="save"], #sheetBody [data-sact="sgsave"]');
+  const b = document.querySelector('#sheetBody [data-sact="save"], #sheetBody [data-sact="sgsave"], #sheetBody [data-sact="asave"]');
   if (b) b.disabled = !ok;
 }
 
@@ -2131,7 +2418,7 @@ function syncScan(){
       if (sn[rec.id] === j) return;
       if (known) { rec.updated = Date.now(); }           /* a real edit, this session */
       sn[rec.id] = JSON.stringify(rec);
-      syncQueue(kind, rec.id, {updated: rec.updated, json: sn[rec.id]});
+      syncQueue(kind, rec.id, {updated: rec.updated, json: sn[rec.id], schema: SCHEMA});
     });
     Object.keys(sn).forEach(id => {
       if (seen[id]) return;
@@ -2147,7 +2434,7 @@ function syncTouch(){ clearTimeout(scanT); scanT = setTimeout(syncScan, 400); }
 function syncQueue(kind, id, rec){
   const rem = remoteTree[kind] && remoteTree[kind][id];
   if (rem && (rem.updated||0) >= (rec.updated||0) && !!rem.deleted === !!rec.deleted
-      && rem.json === rec.json) return;                  /* already up there, byte for byte */
+      && rem.json === rec.json && (rem.schema||0) === (rec.schema||0)) return;   /* already up there */
   dirty.set(kind + '/' + id, rec);
   clearTimeout(pushT); pushT = setTimeout(syncPush, 700);
   syncSetState(syncState);
@@ -2181,6 +2468,9 @@ function syncMerge(tree){
     const m = (tree && tree[kind]) || {}, list = listOf(kind);
     Object.keys(m).forEach(id => {
       const rec = m[id]; if (!rec) return;
+      /* A device on an older build must not try to read a record written by a newer one —
+         it would silently drop the fields it does not know about on the next save. */
+      if ((rec.schema || 0) > SCHEMA) return;
       const ru = rec.updated || 0;
       const i  = list.findIndex(x => x && x.id === id);
       const lu = i > -1 ? (list[i].updated || 0) : (DB.tomb[kind][id] || 0);

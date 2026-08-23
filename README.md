@@ -40,6 +40,10 @@ confirm you're seeing the new build.
 The app versions its own storage and migrates on load, so an older phone picks up schema
 changes automatically without losing rounds.
 
+**Rounds logged before the shot chain existed are marked with a `gaps` badge.** Nothing is
+back-filled — shots that were never written down cannot be inferred — so those rounds keep
+answering everything they can and sit out anything that needs the full sequence.
+
 ---
 
 ## The tracking model
@@ -52,11 +56,23 @@ nothing. That principle is kept here, with one deliberate exception.
 
 | Area | What you log |
 |---|---|
-| **Tee shot** | Result, direction, distance and strike on every drive. Amounts only when it missed. |
-| **Approach** | One tap always (green / missed / no shot). Detail only on a miss. |
-| **Short game** | Only shots inside 50 yards, only when you took one. |
-| **Putting** | **Every putt, in full.** |
+| **Tee shot** | Result, direction, distance and strike on every drive. Amounts only when it missed. Par 3s have no tee card — that shot is the approach. |
+| **Approach, layups & recovery** | Every full swing after the tee, in order. Detail only where it costs you. |
+| **Penalties** | A count per hole. They are strokes, so they belong in the arithmetic. |
+| **Short game** | Only shots inside 50 yards, only when you took one — with the club and the shot type. |
+| **Putting** | **Every putt, in full**, including putts played from off the green. |
 | **Mental** | Only when a fault applied, tagged to the phase it happened in. |
+
+### The hole has to add up
+
+Every hole shows one line: **shots + penalties = score**. When it doesn't balance, it says so and
+says by how much — at the hole, while you can still remember what was missed. The round summary
+runs the same check across all eighteen.
+
+This is the check that found the problem this whole model exists to fix. Before it, a par-3 tee
+shot was recorded twice, a layup on a par 4 had nowhere to go at all, and penalty strokes were
+never counted — three errors pointing in two opposite directions, so round totals still looked
+plausible while more than a third of holes were wrong.
 
 Putting is the exception because make rates and strokes gained are ratios — they need the
 denominator. If you only log the putts you miss, the numbers are meaningless. The tee shot
@@ -92,10 +108,16 @@ miss; result alone can't tell you whether you're getting away with it.
 Par 3s have no tee-shot card. The tee shot *is* the approach and is logged there, so it
 counts toward greens in regulation and not toward driving stats.
 
-### Approach
+### Approach, layups and recovery
 
-Green, missed, or no shot (laid up, or playing out after a penalty). "No shot" keeps
-non-attempts out of the GIR denominator.
+One ordered list per hole holding every full swing after the tee shot. Each one is a **layup**
+(deliberately short), a **recovery** (the green was never the target), or the shot that went at
+the green — **green** or **missed**. A par 5 second, a punch-out and the approach itself are all
+the same kind of record and all live here, in the order they were played.
+
+**Greens in regulation is worked out, not ticked.** The ball is on the putting surface in par
+minus two, penalties counted. That is only answerable if the sequence is complete, which is the
+real reason the shots have to be there.
 
 Miss location is a 3×3 grid — long-left through short-right. Over a season this is the
 most useful single chart in the app: a consistent short-right pattern is a club-selection
@@ -107,9 +129,19 @@ the Accuracy Plan is the directional work.
 
 ### Short game
 
-Anything inside 50 yards: distance, lie, strike, and whether it found the green — with feet
-from the pin if it did, or yards remaining if it didn't. Proximity is the number that
-decides your up-and-down rate; technique is downstream of it.
+Anything inside 50 yards: distance, **club**, **shot type**, lie, strike, and whether it found
+the green — with feet from the pin if it did, or yards remaining if it didn't.
+
+Type is chip, pitch, bunker, full wedge or putt, suggested from the club, lie and distance and
+changeable on the shot. It matters because **up and down counts greenside shots only**. A
+105-yard gap wedge is a full swing that happens to be logged here; folding it in was inflating
+the denominator and understating the scramble rate. Full wedges get their own proximity number
+instead.
+
+Pick **Putter** and the sheet stops asking whether the strike was flush, fat or thin — questions
+about a wedge — and offers the putting descriptors instead. That shot then counts twice, on
+purpose: as a short-game shot for up-and-down, and as a putt in the lag and make-rate numbers. A
+35-foot putt from the fringe is the same skill as a 35-foot putt on the green.
 
 ### Putting
 
