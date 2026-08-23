@@ -1093,8 +1093,10 @@ function holeScreen(r){
     return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
       + '<b>'+(s.dist!=null?s.dist+'y':'—')+' from '+esc(s.lie||'—')
       + (ty?' · '+esc(ty):'')+(s.club?' · '+esc(s.club):'')+'</b>'
-      + '<em>'+res+(s.strike && s.strike.length ? ' · '+esc(s.strike.join(', ')) : '')
-      + (s.miss && s.miss.length ? ' · '+esc(s.miss.join(', ').toLowerCase()) : '')+'</em></div>'
+      + '<em>'+res
+      + (!s.fromOffGreen && s.strike && s.strike.length ? ' · '+esc(s.strike.join(', ')) : '')
+      + (s.fromOffGreen && s.miss && s.miss.length ? ' · missed '+esc(s.miss.join(', ').toLowerCase()) : '')
+      + '</em></div>'
       + '<button class="del" data-act="edit-short" data-v="'+i+'">✎</button>'
       + '<button class="del" data-act="del-short" data-v="'+i+'">🗑</button></div>';
   }).join('') : '';
@@ -1194,6 +1196,9 @@ function shortSheet(idx, preset){
     ? {dist:(preset==null?null:preset), club:'', type:null, lie:null, strike:[], miss:[],
        onGreen:null, prox:null, remYds:null, fromOffGreen:false}
     : JSON.parse(JSON.stringify(h.short[idx]));
+  /* a record written by an older build may be missing either grade array */
+  if (!Array.isArray(tmp.strike)) tmp.strike = [];
+  if (!Array.isArray(tmp.miss))   tmp.miss   = [];
   tmp._i = idx;
   tmp._n = (idx==null ? h.short.length : idx) + 1;
   tmp._chained = idx==null && preset!=null;
@@ -1237,7 +1242,7 @@ function appSheet(idx, preset){
   const h = H();
   tmp = idx==null
     ? newApp({dist: preset==null ? null : preset, lie: (h.par===3 && !h.app.length) ? 'Tee' : null})
-    : JSON.parse(JSON.stringify(h.app[idx]));
+    : newApp(JSON.parse(JSON.stringify(h.app[idx])));
   tmp._i = idx;
   tmp._n = (idx==null ? h.app.length : idx) + 1;
   tmp._chained = idx==null && preset!=null;
@@ -1434,7 +1439,9 @@ function summarise(rounds){
           if (sg.prox!=null) S.sgProx.push(sg.prox);
         } else if (sg.prox!=null) S.wedgeProx.push(sg.prox);
         if (sg.lie){ S.sgLie[sg.lie]=S.sgLie[sg.lie]||{n:0,prox:[]}; S.sgLie[sg.lie].n++; if(sg.prox!=null) S.sgLie[sg.lie].prox.push(sg.prox); }
-        (sg.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
+        /* a putt carries no wedge grade — any strike still on the record is a leftover
+           from before it was marked as a putt, and must not reach the strike chart */
+        if (!sg.fromOffGreen) (sg.strike||[]).forEach(k=>S.sgStrike[k]=(S.sgStrike[k]||0)+1);
         /* A putt from the fringe is the same skill as a putt on it. It stays a
            short-game shot for up-and-down and also joins the putting numbers. */
         if (sg.fromOffGreen && sg.dist!=null){
@@ -2056,8 +2063,8 @@ function csvShots(){
       (m.app||[]).join('|'), h.note]));
     h.short.forEach(sg => push(['short_' + ((sg.type || sgTypeFor(sg) || 'shot').replace(' ','_')), sg.club,
       sg.onGreen===true?'on green':sg.onGreen===false?'missed green':'', '', '', '', '',
-      (sg.strike||[]).join('|'), sg.lie, sg.dist, '', sg.onGreen===false ? sg.remYds : sg.prox,
-      '', '', '', '', '', (sg.miss||[]).join('|'), '', '']));
+      sg.fromOffGreen ? '' : (sg.strike||[]).join('|'), sg.lie, sg.dist, '', sg.onGreen===false ? sg.remYds : sg.prox,
+      '', '', '', '', '', sg.fromOffGreen ? (sg.miss||[]).join('|') : '', '', '']));
     h.putts.forEach((p,i) => push(['putt_'+(i+1), 'Putter', p.holed?'holed':'missed', '', '', '', '', '',
       'Green', '', '', '', p.dist, p.brk, p.slope, p.holed?'yes':'no', p.rem, (p.miss||[]).join('|'),
       i===0 ? (m.putt||[]).join('|') : '', '']));
@@ -2278,9 +2285,12 @@ function sheetAction(a, v, node, silent){
       if (tmp.dist==null || tmp.onGreen==null) return;
       const ty = tmp.type || sgTypeFor(tmp);
       const putt = ty==='putt' || tmp.club==='Putter';
+      /* Both grades are kept on the record even though only one applies. Flipping a
+         shot to Putter and back must not quietly destroy the wedge strike it had — the
+         stats read whichever one fits the shot and ignore the other. */
       const sg = {dist:tmp.dist, club:tmp.club, type:ty, lie:tmp.lie,
-                  strike: putt ? [] : tmp.strike.slice(),
-                  miss:   putt ? tmp.miss.slice() : [],
+                  strike: (tmp.strike||[]).slice(),
+                  miss:   (tmp.miss||[]).slice(),
                   onGreen:tmp.onGreen, prox:tmp.prox, remYds:tmp.remYds,
                   /* a putt played from off the putting surface — it counts as a short-game
                      shot for up-and-down AND as a putt for lag and make rate */
@@ -2314,7 +2324,7 @@ function sheetAction(a, v, node, silent){
       if (tmp.state==null) return;
       if (!AT_GREEN(tmp.state) && tmp.result==null) return;
       const a = newApp({state:tmp.state, kind:tmp.kind, dist:tmp.dist, club:tmp.club, lie:tmp.lie,
-                        strike:tmp.strike.slice(), result:tmp.result, remYds:tmp.remYds,
+                        strike:(tmp.strike||[]).slice(), result:tmp.result, remYds:tmp.remYds,
                         zone:tmp.zone, prox:tmp.prox});
       const isNew = tmp._i==null;
       if (isNew) h.app.push(a); else h.app[tmp._i]=a;
