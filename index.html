@@ -2137,13 +2137,14 @@ document.addEventListener('change', e=>{
 });
 document.addEventListener('input', e=>{
   const t = e.target;
+  /* A <select> fires 'input' as well as 'change', and this listener's handlers are allowed
+     to redraw the sheet. Redrawing on 'input' destroys the very <select> the native picker
+     is attached to, mid-pick — on a phone that reads as "the dropdown doesn't work".
+     Selects are handled on 'change' only, once the picker has closed. */
+  if (t.tagName === 'SELECT') return;
   if (t.dataset.act==='hole-note'){ const h=H(); if(h){ h.note=t.value; save(); } return; }
   if (t.id==='pNotes'){ pDraft.notes = t.value; return; }
   if (['nrCourse','nrTees','nrRating','nrSlope','nrIndex'].indexOf(t.id) > -1){ updateCH(); return; }
-  if (['app-dist','app-prox'].indexOf(t.dataset.act)>-1){
-    const h=H(); if(!h) return;
-    setField(h.app, t.dataset.act==='app-dist'?'dist':'prox', t.value===''?null:+t.value); save(); return;
-  }
   const s = t.closest('[data-sact]'); if (s) sheetAction(s.dataset.sact, t.value, s, true);
 });
 
