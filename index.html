@@ -352,7 +352,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 const KEY = 'shotTrackerV1';
 /* Shown on the Data screen so "which version am I running" is answerable by looking,
    rather than by guessing whether a reload took. Keep in step with CACHE in sw.js. */
-const BUILD = 'v17';
+const BUILD = 'v18';
 
 /* ---------- reference data ---------- */
 const CLUBS = ['Driver','Mini driver','3 wood','4 wood','5 wood','7 wood',
@@ -384,9 +384,16 @@ const APP_STATES = [
   {k:'gir',      label:'Green',    sub:'Found the putting surface', cls:'ok'},
   {k:'miss',     label:'Missed',   sub:'Went at it, missed',        cls:'bad'},
   {k:'layup',    label:'Layup',    sub:'Deliberately short'},
-  {k:'recovery', label:'Recovery', sub:'Green was never the target', cls:'mid'}
+  {k:'recovery', label:'Recovery', sub:'Green was never the target', cls:'mid'},
+  /* Stroke and distance: the ball is played again from the tee. That is a second drive,
+     not an approach — it carries the tee vocabulary (result, direction, offline, distance,
+     strike) in its own `tee` object, so it lands in the driving numbers where it belongs
+     and never touches the layup or recovery buckets. The penalty stroke itself is counted
+     separately, on the hole's penalty stepper. */
+  {k:'retee',    label:'Re-tee',   sub:'Again from the tee, after a penalty', cls:'bad'}
 ];
 const AT_GREEN  = st => st==='gir' || st==='miss';
+const IS_RETEE  = st => st==='retee';
 const SG_CLUBS  = CLUBS.concat(['Putter']);
 const SG_TYPES  = [
   {k:'chip',       label:'Chip'},
@@ -550,7 +557,8 @@ function saveNow(){
 const newTee = () => ({club:'Driver', outcome:null, dir:null, offline:null,
                       dist:null, distOff:null, strike:[]});
 const newApp = o => Object.assign({state:null, kind:null, dist:null, club:'', lie:null,
-                      strike:[], result:null, remYds:null, zone:null, prox:null}, o||{});
+                      strike:[], result:null, remYds:null, zone:null, prox:null,
+                      tee:null}, o||{});
 
 function newHole(i, par){
   const p = par || DEFAULT_PARS[i] || 4;
@@ -623,6 +631,7 @@ function migrate(){
       if (sg.club === undefined) sg.club = '';
       if (sg.type === undefined) sg.type = sgTypeFor(sg);
       if (sg.fromOffGreen === undefined) sg.fromOffGreen = false;
+      if (sg.holed === undefined) sg.holed = (sg.onGreen === true && sg.prox === 0);
       if (!Array.isArray(sg.miss)) sg.miss = [];
     });
     if (h.score != null && holeShots(h) + (h.penalties||0) !== h.score) gaps++;
@@ -1058,6 +1067,16 @@ function holeScreen(r){
   const shotLine = (a,i) => {
     const st = APP_STATES.find(x=>x.k===a.state) || {};
     const kind = a.kind==='advance' ? 'Advance' : (st.label || 'Shot');
+    if (IS_RETEE(a.state)){
+      const T = a.tee || {};
+      const dirL = (TEE_DIR.find(d=>d.k===T.dir)||{}).label;
+      return '<div class="shotrow"><div class="n">'+(i+1)+'</div><div class="txt">'
+        + '<b>Re-tee'+(T.club?' \u00b7 '+esc(T.club):'')+'</b>'
+        + '<em>'+esc([T.outcome, dirL, T.offline].filter(Boolean).join(' \u00b7 ') || 'result not logged')
+        + (T.strike && T.strike.length ? ' \u00b7 '+esc(T.strike.join(', ')) : '')+'</em></div>'
+        + '<button class="del" data-act="edit-app" data-v="'+i+'">\u270e</button>'
+        + '<button class="del" data-act="del-app" data-v="'+i+'">\uD83D\uDDD1</button></div>';
+    }
     const res = AT_GREEN(a.state)
       ? (a.state==='gir'
           ? '<span class="holed">on the green</span>' + (a.prox!=null ? ', ' + a.prox + ' ft' : '')
@@ -1076,7 +1095,7 @@ function holeScreen(r){
 
   const lastA = h.app[h.app.length-1];
   /* the yards left IS the next shot's distance — hand it over rather than retype it */
-  if (lastA && !AT_GREEN(lastA.state) && lastA.remYds!=null)
+  if (lastA && !AT_GREEN(lastA.state) && !IS_RETEE(lastA.state) && lastA.remYds!=null)
     ab += '<div class="row" style="margin-top:14px"><button class="btn full" data-act="chain-app" data-v="'+lastA.remYds+'">'
         + 'Next shot from ' + lastA.remYds + ' yds →</button></div>';
   if (lastA && lastA.state==='gir' && lastA.prox!=null && !h.putts.length)
@@ -1092,7 +1111,9 @@ function holeScreen(r){
 
   /* short game */
   let sb = h.short.length ? h.short.map((s,i)=>{
-    const res = s.onGreen === true
+    const res = s.holed === true
+        ? '<span class="holed">holed it</span>'
+      : s.onGreen === true
         ? '<span class="holed">on the green</span>' + (s.prox!=null ? ', ' + s.prox + ' ft' : '')
       : s.onGreen === false
         ? 'missed again' + (s.remYds!=null ? ', ' + s.remYds + ' yds left' : '')
@@ -1202,7 +1223,7 @@ function shortSheet(idx, preset){
   const h = H();
   tmp = idx==null
     ? {dist:(preset==null?null:preset), club:'', type:null, lie:null, strike:[], miss:[],
-       onGreen:null, prox:null, remYds:null, fromOffGreen:false}
+       onGreen:null, holed:false, prox:null, remYds:null, fromOffGreen:false}
     : JSON.parse(JSON.stringify(h.short[idx]));
   /* a record written by an older build may be missing either grade array */
   if (!Array.isArray(tmp.strike)) tmp.strike = [];
@@ -1231,9 +1252,11 @@ function drawShortSheet(){
         : '<div class="row"><span class="lbl">Strike</span>'+segRow('sgStrike',SG_STRIKE,s.strike,'sact')+'</div>')
     + '<hr class="sep">'
     + '<div class="row"><span class="lbl">Where it finished</span>'
-    + segRow('sgOn',[{k:'yes',label:'On the green',cls:'ok'},{k:'no',label:'Missed again',cls:'bad'}],
-        s.onGreen===true?'yes':s.onGreen===false?'no':null,'sact')+'</div>';
-  if (s.onGreen === true)
+    + segRow('sgOn',[{k:'holed',label:'Holed',sub:'Went in',cls:'ok'},
+                     {k:'yes',  label:'On the green',cls:'ok'},
+                     {k:'no',   label:'Missed again',cls:'bad'}],
+        s.holed===true?'holed':s.onGreen===true?'yes':s.onGreen===false?'no':null,'sact')+'</div>';
+  if (s.onGreen === true && !s.holed)
     b += '<div class="row"><div class="fld" style="width:150px"><label>'
       + (isPutt ? 'Feet left (0 if holed)' : 'Feet from pin') + '</label>'
       + '<input type="number" inputmode="numeric" data-sact="sgprox" value="'+(s.prox??'')+'" placeholder="8"></div></div>';
@@ -1263,6 +1286,32 @@ function drawAppSheet(){
   let b = (s._chained ? '<div class="note" style="margin:0 0 10px">Distance carried over from the shot before — change it if you paced it differently.</div>' : '')
     + (p3first ? '<div class="note" style="margin:0 0 10px">Par 3 — this is the tee shot and the shot at the green. It is logged once, here.</div>' : '')
     + '<div class="row"><span class="lbl">What was this shot</span>'+segRow('aState',APP_STATES,s.state,'sact')+'</div>';
+
+  /* A re-tee asks the tee-shot questions, because that is what it is. */
+  if (IS_RETEE(s.state)){
+    const T = s.tee || (s.tee = newTee());
+    b += '<div class="note" style="margin:0 0 10px">Playing again from the tee. Add the penalty stroke on the hole itself — this card is the swing, the stepper is the stroke.</div>'
+      + '<hr class="sep">'
+      + '<div class="row"><span class="lbl">Result</span>'+segRow('aTeeOut',TEE_OUT,T.outcome,'sact')+'</div>'
+      + '<hr class="sep">'
+      + '<div class="row"><span class="lbl">Where it finished</span>'+segRow('aTeeDir',TEE_DIR,T.dir,'sact')+'</div>'
+      + ((T.dir==='L'||T.dir==='R')
+          ? '<div class="row"><span class="lbl">How far '+(T.dir==='L'?'left':'right')+'</span>'
+            + segRow('aTeeOff',OFFLINE,T.offline,'sact')+'</div>' : '')
+      + '<div class="row"><span class="lbl">Distance</span>'+segRow('aTeeDist',TEE_DIST,T.dist,'sact')+'</div>'
+      + ((T.dist==='short'||T.dist==='long')
+          ? '<div class="row"><span class="lbl">How far '+(T.dist==='short'?'short':'past it')+'</span>'
+            + segRow('aTeeDistOff',OFFLINE,T.distOff,'sact')+'</div>' : '')
+      + '<hr class="sep">'
+      + '<div class="row"><span class="lbl">Strike</span>'+segRow('aTeeStrike',TEE_STRIKE,T.strike,'sact')+'</div>'
+      + '<div class="row" style="margin-top:12px"><div class="fld grow"><label>Club off the tee</label>'
+      + selectEl('aTeeClub',CLUBS,T.club,null,'sact')+'</div></div>'
+      + '<div class="row" style="margin-top:16px">'
+      + '<button class="btn full" data-sact="asave"'+(T.outcome?'':' disabled')+'>Save shot</button></div>';
+    openSheet((tmp._i==null ? 'Shot ' : 'Edit shot ') + tmp._n, b);
+    return;
+  }
+
   if (s.state){
     b += '<hr class="sep">'
       + '<div class="row"><div class="fld" style="width:118px"><label>Yards to pin</label>'
@@ -1338,7 +1387,7 @@ function summarise(rounds){
     rounds: rounds.length, holes:0, scored:0, strokes:0, parTotal:0,
     teeLogged:0, teeGood:0, teeBlocked:0, teeTrouble:0, teePenalty:0,
     teeDir:{L:0,F:0,R:0}, teeOff:{}, teeStrike:{}, teeDist:{short:0,ok:0,long:0}, teeDistOff:{},
-    teeDirN:0, teeDistN:0, teeStrikeN:0,
+    teeDirN:0, teeDistN:0, teeStrikeN:0, retees:0,
     appN:0, appGreen:0, girN:0, girHoles:0, zones:{}, appStrike:{}, appProx:[], appDistBand:{},
     extraN:0, xKind:{}, xOut:{}, xLie:{}, xStrike:{}, xRem:[], xResultN:0, xBackInPlay:0, xPenalty:0,
     shortN:0, nearN:0, sgLie:{}, sgStrike:{}, sgProx:[], sgOnGreen:0, sgResultN:0,
@@ -1370,22 +1419,27 @@ function summarise(rounds){
       S.holes++;
       if (h.score!=null){ S.scored++; S.strokes+=h.score; S.parTotal+=h.par; rs.strokes+=h.score; rs.par+=h.par; rs.n++; }
 
-      /* tee */
-      if (h.par!==3 && h.tee && (h.tee.outcome || h.tee.dir)){
-        if (h.tee.outcome){
+      /* tee — the drive, plus any re-tee played after a penalty. Both are real swings off
+         the tee and both belong in the driving numbers; a re-tee is not an approach. */
+      const teeShots = [];
+      if (h.par!==3 && h.tee && (h.tee.outcome || h.tee.dir)) teeShots.push(h.tee);
+      h.app.forEach(a => { if (IS_RETEE(a.state) && a.tee && (a.tee.outcome || a.tee.dir)) teeShots.push(a.tee); });
+      teeShots.forEach(T => {
+        if (T.outcome){
           S.teeLogged++; rs.teeN++;
-          if (h.tee.outcome==='good'){ S.teeGood++; rs.inPlay++; }
-          if (h.tee.outcome==='blocked'){ S.teeBlocked++; rs.inPlay++; }
-          if (h.tee.outcome==='trouble') S.teeTrouble++;
-          if (h.tee.outcome==='penalty') S.teePenalty++;
+          if (T.outcome==='good'){ S.teeGood++; rs.inPlay++; }
+          if (T.outcome==='blocked'){ S.teeBlocked++; rs.inPlay++; }
+          if (T.outcome==='trouble') S.teeTrouble++;
+          if (T.outcome==='penalty') S.teePenalty++;
         }
-        if (h.tee.dir){ S.teeDirN++; S.teeDir[h.tee.dir]=(S.teeDir[h.tee.dir]||0)+1; }
-        if (h.tee.offline) S.teeOff[h.tee.offline]=(S.teeOff[h.tee.offline]||0)+1;
-        if (h.tee.dist){ S.teeDistN++; S.teeDist[h.tee.dist]=(S.teeDist[h.tee.dist]||0)+1; }
-        if (h.tee.distOff) S.teeDistOff[h.tee.distOff]=(S.teeDistOff[h.tee.distOff]||0)+1;
-        if ((h.tee.strike||[]).length) S.teeStrikeN++;
-        (h.tee.strike||[]).forEach(k=>S.teeStrike[k]=(S.teeStrike[k]||0)+1);
-      }
+        if (T.dir){ S.teeDirN++; S.teeDir[T.dir]=(S.teeDir[T.dir]||0)+1; }
+        if (T.offline) S.teeOff[T.offline]=(S.teeOff[T.offline]||0)+1;
+        if (T.dist){ S.teeDistN++; S.teeDist[T.dist]=(S.teeDist[T.dist]||0)+1; }
+        if (T.distOff) S.teeDistOff[T.distOff]=(S.teeDistOff[T.distOff]||0)+1;
+        if ((T.strike||[]).length) S.teeStrikeN++;
+        (T.strike||[]).forEach(k=>S.teeStrike[k]=(S.teeStrike[k]||0)+1);
+      });
+      if (teeShots.length > 1) S.retees += teeShots.length - 1;
 
       /* approach — the shot that was actually aimed at the green */
       const atGreen = h.app.filter(a => AT_GREEN(a.state));
@@ -1415,7 +1469,7 @@ function summarise(rounds){
       }
 
       /* layups and recoveries — their own bucket, never folded into approach or GIR */
-      h.app.filter(a => !AT_GREEN(a.state)).forEach(x=>{
+      h.app.filter(a => !AT_GREEN(a.state) && !IS_RETEE(a.state)).forEach(x=>{
         S.extraN++;
         const kind = x.kind || x.state;
         if (kind) S.xKind[kind] = (S.xKind[kind]||0)+1;
@@ -1457,7 +1511,7 @@ function summarise(rounds){
           S.offGreenPutts++;
           const ft = sg.dist * 3;                         /* yards to pin, in feet */
           const bk = puttBucket(ft);
-          const holed = sg.onGreen === true && sg.prox === 0;
+          const holed = sg.holed === true;
           S.bucket[bk.k].n++; if (holed) S.bucket[bk.k].made++;
           if (ft>=20){ S.lagFrom.push(ft); S.lagLeft.push(holed ? 0 : (sg.prox ?? null)); }
           if (!holed) (sg.miss||[]).forEach(k=>S.puttMiss[k]=(S.puttMiss[k]||0)+1);
@@ -1761,7 +1815,8 @@ function renderStats(){
   const relPer = S.rounds ? (S.strokes - S.parTotal)/S.rounds : null;
   h += '<div class="tiles">'
     + tile('Scoring average', S.avgScore==null?'—':r1(S.avgScore), relPer==null?'':plus(r1(relPer))+' to par · '+S.rounds+' round'+(S.rounds===1?'':'s'))
-    + tile('Drives in play', fmtPct(S.inPlayPct), 'Clear shot to green '+fmtPct(S.clearPct))
+    + tile('Drives in play', fmtPct(S.inPlayPct), 'Clear shot to green '+fmtPct(S.clearPct)
+        + (S.retees ? ' \u00b7 '+S.retees+' re-tee'+(S.retees===1?'':'s') : ''))
     + tile('Fairways hit', fmtPct(S.fairwayPct), S.teeDir.F+' of '+S.teeDirN+' drives')
     + tile('Greens in reg', fmtPct(S.girPct), S.girN+' of '+S.girHoles+(S.avgProx?' · '+r1(S.avgProx)+' ft avg':''))
     + tile('Putts per round', S.puttsPerRound==null?'—':r1(S.puttsPerRound), S.threePutts+' three-putt'+(S.threePutts===1?'':'s')+' · '+S.onePutts+' one-putt'+(S.onePutts===1?'':'s'))
@@ -2067,11 +2122,20 @@ function csvShots(){
       DIR[h.tee.dir] || h.tee.dir, h.tee.offline, h.tee.dist, h.tee.distOff,
       (h.tee.strike||[]).join('|'), '', '', '', '', '', '', '', '', '', '',
       (m.tee||[]).join('|'), h.note]);
-    h.app.forEach(a => push([AT_GREEN(a.state) ? 'approach' : (a.kind || a.state),
-      a.club, AT_GREEN(a.state) ? a.state : a.result, '', '', '', '',
-      (a.strike||[]).join('|'), a.lie, a.dist, a.zone,
-      AT_GREEN(a.state) ? a.prox : a.remYds, '', '', '', '', '', '',
-      (m.app||[]).join('|'), h.note]));
+    h.app.forEach(a => {
+      if (IS_RETEE(a.state)){
+        const T = a.tee || {};
+        push(['retee', T.club, T.outcome, DIR[T.dir] || T.dir, T.offline, T.dist, T.distOff,
+          (T.strike||[]).join('|'), 'Tee', '', '', '', '', '', '', '', '', '',
+          (m.tee||[]).join('|'), h.note]);
+        return;
+      }
+      push([AT_GREEN(a.state) ? 'approach' : (a.kind || a.state),
+        a.club, AT_GREEN(a.state) ? a.state : a.result, '', '', '', '',
+        (a.strike||[]).join('|'), a.lie, a.dist, a.zone,
+        AT_GREEN(a.state) ? a.prox : a.remYds, '', '', '', '', '', '',
+        (m.app||[]).join('|'), h.note]);
+    });
     h.short.forEach(sg => push(['short_' + ((sg.type || sgTypeFor(sg) || 'shot').replace(' ','_')), sg.club,
       sg.onGreen===true?'on green':sg.onGreen===false?'missed green':'', '', '', '', '',
       sg.fromOffGreen ? '' : (sg.strike||[]).join('|'), sg.lie, sg.dist, '', sg.onGreen===false ? sg.remYds : sg.prox,
@@ -2297,7 +2361,14 @@ function sheetAction(a, v, node, silent){
     case 'sgLie':   tmp.lie = tmp.lie===v?null:v; drawShortSheet(); return;
     case 'sgStrike':toggleIn(tmp.strike, v); drawShortSheet(); return;
     case 'sgMiss':  toggleIn(tmp.miss, v); drawShortSheet(); return;
-    case 'sgOn':    tmp.onGreen = v==='yes'; if (tmp.onGreen) tmp.remYds=null; else tmp.prox=null; drawShortSheet(); return;
+    case 'sgOn': {
+      tmp.holed   = v==='holed';
+      tmp.onGreen = v!=='no';                 /* holed counts as having reached the green */
+      if (tmp.holed){ tmp.prox = 0; tmp.remYds = null; }
+      else if (tmp.onGreen) tmp.remYds = null;
+      else tmp.prox = null;
+      drawShortSheet(); return;
+    }
     case 'sgprox':  tmp.prox = v===''?null:+v; return;
     case 'sgrem':   tmp.remYds = v===''?null:+v; return;
     case 'sgsave': {
@@ -2310,7 +2381,8 @@ function sheetAction(a, v, node, silent){
       const sg = {dist:tmp.dist, club:tmp.club, type:ty, lie:tmp.lie,
                   strike: (tmp.strike||[]).slice(),
                   miss:   (tmp.miss||[]).slice(),
-                  onGreen:tmp.onGreen, prox:tmp.prox, remYds:tmp.remYds,
+                  onGreen:tmp.onGreen, holed:tmp.holed===true,
+                  prox: tmp.holed ? 0 : tmp.prox, remYds:tmp.remYds,
                   /* a putt played from off the putting surface — it counts as a short-game
                      shot for up-and-down AND as a putt for lag and make rate */
                   fromOffGreen: putt};
@@ -2318,7 +2390,8 @@ function sheetAction(a, v, node, silent){
       if (isNew) h.short.push(sg); else h.short[tmp._i]=sg;
       saveNow(); closeSheet(); render();
       /* keep walking the hole: on the green means putts, still short means another chip */
-      if (isNew){
+      /* a shot that went in ends the hole — there is nothing to chain into */
+      if (isNew && !sg.holed){
         if (sg.onGreen && sg.prox!=null && !h.putts.length) puttSheet(null, sg.prox);
         else if (!sg.onGreen && sg.remYds!=null && sg.remYds>0) shortSheet(null, sg.remYds);
       }
@@ -2328,9 +2401,21 @@ function sheetAction(a, v, node, silent){
       tmp.state = tmp.state===v ? null : v;
       if (tmp.state==='gir') tmp.zone = null;
       if (AT_GREEN(tmp.state)) tmp.result = tmp.remYds = null; else tmp.zone = tmp.prox = null;
-      if (H().par===3 && (tmp._i===0 || (tmp._i==null && !H().app.length))) tmp.lie = 'Tee';
+      if (IS_RETEE(tmp.state)){ if (!tmp.tee) tmp.tee = newTee(); tmp.lie = 'Tee'; }
+      else if (H().par===3 && (tmp._i===0 || (tmp._i==null && !H().app.length))) tmp.lie = 'Tee';
       drawAppSheet(); return;
     }
+    case 'aTeeOut':     tmp.tee.outcome = tmp.tee.outcome===v?null:v; drawAppSheet(); return;
+    case 'aTeeDir':     tmp.tee.dir = tmp.tee.dir===v?null:v;
+                        if (tmp.tee.dir==='F' || tmp.tee.dir==null) tmp.tee.offline = null;
+                        drawAppSheet(); return;
+    case 'aTeeOff':     tmp.tee.offline = tmp.tee.offline===v?null:v; drawAppSheet(); return;
+    case 'aTeeDist':    tmp.tee.dist = tmp.tee.dist===v?null:v;
+                        if (tmp.tee.dist==='ok' || tmp.tee.dist==null) tmp.tee.distOff = null;
+                        drawAppSheet(); return;
+    case 'aTeeDistOff': tmp.tee.distOff = tmp.tee.distOff===v?null:v; drawAppSheet(); return;
+    case 'aTeeStrike':  toggleIn(tmp.tee.strike, v); drawAppSheet(); return;
+    case 'aTeeClub':    tmp.tee.club = v; return;
     case 'adist':   tmp.dist = v===''?null:+v; return;
     case 'aClub':   tmp.club = v; return;
     case 'aLie':    tmp.lie = tmp.lie===v?null:v; drawAppSheet(); return;
@@ -2341,6 +2426,15 @@ function sheetAction(a, v, node, silent){
     case 'arem':    tmp.remYds = v===''?null:+v; return;
     case 'asave': {
       if (tmp.state==null) return;
+      if (IS_RETEE(tmp.state)){
+        if (!tmp.tee || tmp.tee.outcome==null) return;
+        const rt = newApp({state:'retee', lie:'Tee',
+          tee: {club:tmp.tee.club, outcome:tmp.tee.outcome, dir:tmp.tee.dir,
+                offline:tmp.tee.offline, dist:tmp.tee.dist, distOff:tmp.tee.distOff,
+                strike:(tmp.tee.strike||[]).slice()}});
+        if (tmp._i==null) h.app.push(rt); else h.app[tmp._i]=rt;
+        saveNow(); closeSheet(); render(); return;
+      }
       if (!AT_GREEN(tmp.state) && tmp.result==null) return;
       const a = newApp({state:tmp.state, kind:tmp.kind, dist:tmp.dist, club:tmp.club, lie:tmp.lie,
                         strike:(tmp.strike||[]).slice(), result:tmp.result, remYds:tmp.remYds,
