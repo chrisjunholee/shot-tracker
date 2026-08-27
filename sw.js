@@ -13,7 +13,7 @@
       manifest — stays cache-first, because those do not change and speed matters more.
       The app still opens with no signal; it just stops being able to serve a stale app to
       someone who is online. */
-const CACHE = 'shot-tracker-v16';
+const CACHE = 'shot-tracker-v17';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

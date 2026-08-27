@@ -352,7 +352,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 const KEY = 'shotTrackerV1';
 /* Shown on the Data screen so "which version am I running" is answerable by looking,
    rather than by guessing whether a reload took. Keep in step with CACHE in sw.js. */
-const BUILD = 'v16';
+const BUILD = 'v17';
 
 /* ---------- reference data ---------- */
 const CLUBS = ['Driver','Mini driver','3 wood','4 wood','5 wood','7 wood',
@@ -756,6 +756,11 @@ function roundRecon(r){
   });
   return {holes, gaps, shots, pen, strokes};
 }
+/* Whether a round's shot chain can be trusted is a fact about the holes right now, not a
+   flag stamped on it once at migration. It was stored, and it was sticky: fixing the holes
+   left the badge on forever. Derived, a round stops being incomplete the moment it adds up. */
+function roundHasGaps(r){ return roundRecon(r).gaps > 0; }
+
 function roundReconLine(r){
   const c = roundRecon(r);
   if (!c.holes) return '';
@@ -970,7 +975,7 @@ function startScreen(){
       const rel = t ? t.strokes - t.par : null;
       return '<div class="roundrow" data-act="open" data-v="'+rr.id+'">'
         + '<div class="sc">'+(t?t.strokes:'—')+'</div>'
-        + '<div class="m"><b>'+esc(rr.course||'Round')+(rr.incomplete?'<span class="badge-inc">gaps</span>':'')+'</b><span>'+esc(rr.date)
+        + '<div class="m"><b>'+esc(rr.course||'Round')+(roundHasGaps(rr)?'<span class="badge-inc">gaps</span>':'')+'</b><span>'+esc(rr.date)
         + (t ? ' · ' + (rel===0?'E':plus(rel)) + ' · ' + t.n + ' holes' : ' · not started')
         + (rr.finished?'':' · in progress') + '</span></div>'
         + '<div class="del" data-act="del-round" data-v="'+rr.id+'">🗑</div></div>';
@@ -1309,7 +1314,7 @@ function finishRound(){
         diff <= (r.index ?? Infinity) ? 'pos' : 'neg') : '')
     + '</div>'
     + roundReconLine(r)
-    + (r.incomplete ? '<div class="note">This round was logged before every shot had a slot, so its chain has gaps. It still counts for everything it can answer; anything that needs the full sequence leaves it out rather than guessing.</div>' : '')
+    + (roundHasGaps(r) ? '<div class="note">Some holes on this round do not add up, so its shot chain has gaps. It still counts for everything it can answer; anything that needs the full sequence leaves it out rather than guessing. Fix the holes and this clears itself.</div>' : '')
     + (ch!=null && !full ? '<div class="note">Score differential needs all 18 holes, so it appears once the round is complete.</div>' : '')
     + '<div class="row"><div class="fld grow"><label>Round notes</label>'
     + '<textarea data-sact="rnote" placeholder="What was the story of the round?">'+esc(r.notes||'')+'</textarea></div></div>'
@@ -1338,7 +1343,7 @@ function summarise(rounds){
     extraN:0, xKind:{}, xOut:{}, xLie:{}, xStrike:{}, xRem:[], xResultN:0, xBackInPlay:0, xPenalty:0,
     shortN:0, nearN:0, sgLie:{}, sgStrike:{}, sgProx:[], sgOnGreen:0, sgResultN:0,
     sgType:{}, wedgeProx:[], offGreenPutts:0, penalties:0,
-    incomplete: rounds.filter(r=>r.incomplete).length,
+    incomplete: rounds.filter(roundHasGaps).length,
     udAtt:0, udMade:0, scrAtt:0, scrMade:0,
     putts:0, threePutts:0, onePutts:0, sgPutt:0, sgPuttHoles:0,
     bucket:{}, breakMake:{}, puttMiss:{}, lagFrom:[], lagLeft:[],
@@ -1358,6 +1363,7 @@ function summarise(rounds){
 
   rounds.forEach(r=>{
     const rs = { id:r.id, date:r.date, course:r.course, strokes:0, par:0, n:0, sgPutt:0, putts:0, gir:0, girN:0, inPlay:0, teeN:0 };
+    const rGaps = roundHasGaps(r);   /* once per round, not once per hole */
     r.holes.forEach(h=>{
       const played = holeTouched(h);
       if (!played) return;
@@ -1399,7 +1405,7 @@ function summarise(rounds){
       /* Greens in regulation is derived from the chain, not read off a flag — except on
          rounds logged before the chain existed, where the shots to derive it from are
          missing and the old flag is the only honest answer. */
-      const gir = girOf(h, r.incomplete);
+      const gir = girOf(h, rGaps);
       if (gir !== null){ S.girHoles++; rs.girN++; }
       if (gir === true){ S.girN++; rs.gir++; }
 
@@ -2053,7 +2059,7 @@ function csvShots(){
     if (!holeTouched(h)) return;
     const base = [r.date, r.course, r.tees, h.n, h.par, h.score, h.penalties||0];
     const m = h.mental || {};
-    const inc = r.incomplete ? 'yes' : 'no';
+    const inc = roundHasGaps(r) ? 'yes' : 'no';
     /* one row per shot, in the order played, so the file reconciles the same way the app does */
     let no = 0;
     const push = cols => rows.push(base.concat([++no]).concat(cols).concat([inc]).map(q).join(','));
