@@ -350,6 +350,9 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 'use strict';
 
 const KEY = 'shotTrackerV1';
+/* Shown on the Data screen so "which version am I running" is answerable by looking,
+   rather than by guessing whether a reload took. Keep in step with CACHE in sw.js. */
+const BUILD = 'v15';
 
 /* ---------- reference data ---------- */
 const CLUBS = ['Driver','Mini driver','3 wood','4 wood','5 wood','7 wood',
@@ -2019,7 +2022,9 @@ function renderData(){
     + '<div class="note" style="margin:10px 0 0">Rounds sync to a private cloud copy shared by every device you open this on. '
     + 'Newest edit wins, per round, so logging on your phone and reviewing on your laptop can no longer lose anything. '
     + 'It keeps working with no signal and catches up when you reconnect.</div>'
-    + '<div class="row" style="margin-top:14px"><button class="btn ghost full" data-act="syncnow">Sync now</button></div>')
+    + '<div class="row" style="margin-top:14px"><button class="btn ghost full" data-act="syncnow">Sync now</button></div>'
+    + '<div class="note" style="margin:12px 0 0;font-variant-numeric:tabular-nums">Build <b>' + BUILD + '</b>'
+    + ' \u00b7 storage schema ' + SCHEMA + '. If this is behind, close the app and reopen it twice.</div>')
   + card('about','About this tracker','',
       '<div class="note" style="margin:0">Built on Adam Young’s shot tracker: log errors, not everything. Tee shots and approaches are only '
     + 'recorded in detail when they cost you, which keeps it to a few taps a hole. Putting is the exception — every putt is logged, '
@@ -2115,6 +2120,13 @@ document.addEventListener('click', e=>{
     document.documentElement.dataset.theme = DB.settings.theme; save(); return;
   }
   if (e.target.closest('#sheetClose') || e.target.id==='sheetBg'){ closeSheet(); render(); return; }
+
+  /* A <select> carries its own data-act / data-sact, and tapping one fires a click on it
+     before the picker opens. Falling through to the handlers below would call them with
+     dataset.v — which a select does not have — wiping the value to undefined, and for any
+     handler that redraws, ripping the element out from under the picker that is trying to
+     open on it. A select is only ever read on 'change'. */
+  if (e.target.tagName === 'SELECT') return;
 
   const s = e.target.closest('[data-sact]');
   if (s){ sheetAction(s.dataset.sact, s.dataset.v, s); return; }
