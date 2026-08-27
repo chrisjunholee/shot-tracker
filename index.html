@@ -352,7 +352,7 @@ hr.sep{border:none;border-top:1px solid var(--border);margin:14px 0}
 const KEY = 'shotTrackerV1';
 /* Shown on the Data screen so "which version am I running" is answerable by looking,
    rather than by guessing whether a reload took. Keep in step with CACHE in sw.js. */
-const BUILD = 'v15';
+const BUILD = 'v16';
 
 /* ---------- reference data ---------- */
 const CLUBS = ['Driver','Mini driver','3 wood','4 wood','5 wood','7 wood',
@@ -2607,7 +2607,22 @@ render();
 syncStart();
 
 if ('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+  /* If a new service worker takes over while this page is running, the page is by
+     definition running the old code — reload it once, immediately, rather than leaving
+     someone on a stale build until they happen to close the app. `hadController` keeps
+     the very first registration from triggering a pointless reload. */
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => { reg.update().catch(()=>{}); })
+      .catch(()=>{});
+  });
 }
 
 </script>
